@@ -1,0 +1,8 @@
+.env
+models/*.dat
+bin/
+tmp/
+logs/
+*.log
+coverage/
+EOF
