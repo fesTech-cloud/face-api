@@ -1,8 +1,12 @@
 package api
 
 import (
+	"log"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -11,6 +15,14 @@ import (
 	"face-api/internal/engine"
 	"face-api/internal/store"
 )
+
+// matchesDir returns an absolute path to logs/matches/ relative to this source file.
+func matchesDir() string {
+	_, file, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(file), "..", "..", "logs", "matches")
+	abs, _ := filepath.Abs(root)
+	return abs
+}
 
 // Handler holds all dependencies for the API layer
 type Handler struct {
@@ -37,6 +49,20 @@ func (h *Handler) Match(c *gin.Context) {
 		return
 	}
 
+	callID := "cm_" + uuid.New().String()[:8]
+
+	outDir := matchesDir()
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		log.Printf("matches dir: %v", err)
+	} else {
+		if err := engine.SaveBase64ToFile(req.ImageA, filepath.Join(outDir, callID+"_a.jpg")); err != nil {
+			log.Printf("save image_a: %v", err)
+		}
+		if err := engine.SaveBase64ToFile(req.ImageB, filepath.Join(outDir, callID+"_b.jpg")); err != nil {
+			log.Printf("save image_b: %v", err)
+		}
+	}
+
 	embA, bboxA, err := h.engine.EmbedBase64(req.ImageA)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "face_a: " + err.Error()})
@@ -58,7 +84,7 @@ func (h *Handler) Match(c *gin.Context) {
 		"confidence": round(conf, 4),
 		"face_a":     gin.H{"detected": true, "bbox": bboxA},
 		"face_b":     gin.H{"detected": true, "bbox": bboxB},
-		"call_id":    "cm_" + uuid.New().String()[:8],
+		"call_id":    callID,
 	})
 }
 
@@ -141,14 +167,18 @@ func (h *Handler) Enroll(c *gin.Context) {
 		return
 	}
 
-	// TODO: store embedding in DB under collection
+	userID, _ := uuid.Parse(c.GetString("user_id"))
+	col, err := h.db.GetOrCreateCollection(c.Request.Context(), userID, req.Collection)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve collection"})
+		return
+	}
 
-	err = h.db.EnrollFace(c.Request.Context(), uuid.New(), req.PersonID, emb[:], req.Metadata)
+	err = h.db.EnrollFace(c.Request.Context(), col.ID, req.PersonID, emb[:], req.Metadata)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enroll face"})
 		return
 	}
-	_ = emb
 
 	c.JSON(http.StatusOK, gin.H{
 		"enrolled":   true,

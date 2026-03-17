@@ -56,11 +56,13 @@ func (h *DashboardHandler) CreateAPIKey(c *gin.Context) {
 		return
 	}
 
-	user, ok := userInterface.(store.User)
+
+	user, ok := userInterface.(*store.User)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user type in context"})
 		return
 	}
+
 
 	req.UserID = user.ID
 	keyRecord, key, err := h.db.CreateAPIKey(c.Request.Context(), req)
@@ -136,4 +138,30 @@ func (h *DashboardHandler) CreatePlan(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "plan created successfully", "plan": plan})
+}
+
+func (h *DashboardHandler) ActivatePlan(c *gin.Context) {
+	var req interfacex.ActivatePlanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user := c.MustGet("user").(*store.User)
+
+	updated, err := h.db.ActivatePlan(c.Request.Context(), user.ID, req.PlanID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "plan activated successfully",
+		"user": interfacex.UserResponse{
+			ID:        updated.ID,
+			BrandName: updated.BrandName,
+			Email:     updated.Email,
+			PlanID:    updated.PlanID,
+		},
+	})
 }

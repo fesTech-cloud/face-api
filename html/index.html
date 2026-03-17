@@ -113,9 +113,13 @@
         color: var(--text);
         padding: 7px 12px;
         border-radius: 4px;
-        width: 220px;
+        width: 180px;
         outline: none;
         transition: border-color 0.2s;
+      }
+
+      .token-active {
+        border-color: var(--green) !important;
       }
 
       .api-config input:focus {
@@ -750,12 +754,21 @@
           value="http://localhost:8080"
           placeholder="http://localhost:8080"
         />
+        <label>AUTH TOKEN</label>
+        <input
+          type="text"
+          id="authToken"
+          placeholder="PASETO token (after login)"
+          style="width: 200px"
+          oninput="updateTokenIndicators()"
+        />
         <label>API KEY</label>
         <input
           type="text"
           id="apiKey"
           placeholder="sk_live_..."
           style="width: 160px"
+          oninput="updateTokenIndicators()"
         />
         <button class="btn btn-green" onclick="checkHealth()" id="healthBtn">
           <div class="spinner" id="healthSpinner"></div>
@@ -792,6 +805,10 @@
           <button class="endpoint-btn" onclick="showPanel('plans-post')">
             <span class="method-badge post">POST</span>
             <span class="ep-name">/plans</span>
+          </button>
+          <button class="endpoint-btn" onclick="showPanel('plans-activate')">
+            <span class="method-badge post">POST</span>
+            <span class="ep-name">/plans/activate</span>
           </button>
         </div>
         <div class="sidebar-section">
@@ -947,6 +964,23 @@
           <button class="btn btn-green btn-full" onclick="runCreatePlan()">
             <div class="spinner" id="plansPostSpinner"></div>
             CREATE PLAN
+          </button>
+        </div>
+
+        <!-- /plans/activate -->
+        <div class="ep-panel" id="panel-plans-activate">
+          <div class="ep-header">
+            <span class="method-badge post" style="font-size: 11px; padding: 4px 10px">POST</span>
+            <span class="ep-path">/dashboard/plans/activate</span>
+          </div>
+          <p class="ep-desc">Switch the authenticated user's active plan. Requires a Bearer token.</p>
+          <div class="field">
+            <label>Plan ID (UUID)</label>
+            <input type="text" id="activatePlanId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          </div>
+          <button class="btn btn-green btn-full" onclick="runActivatePlan()">
+            <div class="spinner" id="activatePlanSpinner"></div>
+            ACTIVATE PLAN
           </button>
         </div>
 
@@ -1399,11 +1433,20 @@
       const $ = (id) => document.getElementById(id);
       const baseUrl = () => $("baseUrl").value.replace(/\/$/, "");
       const apiKey = () => $("apiKey").value.trim();
+      const authToken = () => $("authToken").value.trim();
 
-      function headers() {
+      // Returns headers using authToken for dashboard routes, apiKey for face routes
+      function headers(path = "") {
         const h = { "Content-Type": "application/json" };
-        if (apiKey()) h["Authorization"] = "Bearer " + apiKey();
+        const isDashboard = path.startsWith("/dashboard");
+        const token = isDashboard ? authToken() : apiKey();
+        if (token) h["Authorization"] = "Bearer " + token;
         return h;
+      }
+
+      function updateTokenIndicators() {
+        $("authToken").classList.toggle("token-active", !!authToken());
+        $("apiKey").classList.toggle("token-active", !!apiKey());
       }
 
       function fileToBase64(file) {
@@ -1526,7 +1569,7 @@
         setLoading(spinnerId, true);
         const start = Date.now();
         try {
-          const opts = { method, headers: headers() };
+          const opts = { method, headers: headers(path) };
           if (body) opts.body = JSON.stringify(body);
           const res = await fetch(baseUrl() + path, opts);
           const data = await res.json();
@@ -1598,8 +1641,9 @@
         }
         const data = await callAPI("POST", "/dashboard/login", { email, password }, "loginSpinner");
         if (data?.token) {
-          $("apiKey").value = data.token;
-          addLog("Token saved to API Key field ✓", "log-ok");
+          $("authToken").value = data.token;
+          updateTokenIndicators();
+          addLog("Token saved to Auth Token field ✓", "log-ok");
         }
       }
 
@@ -1612,6 +1656,16 @@
       // ── GET /plans ────────────────────────────────────────────────────────────────
       async function runGetPlans() {
         await callAPI("GET", "/dashboard/plans", null, "plansGetSpinner");
+      }
+
+      // ── POST /plans/activate ──────────────────────────────────────────────────────
+      async function runActivatePlan() {
+        const plan_id = $("activatePlanId").value.trim();
+        if (!plan_id) {
+          alert("Please enter a Plan ID.");
+          return;
+        }
+        await callAPI("POST", "/dashboard/plans/activate", { plan_id }, "activatePlanSpinner");
       }
 
       // ── POST /plans ───────────────────────────────────────────────────────────────

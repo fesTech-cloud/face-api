@@ -3,6 +3,9 @@ package engine
 import (
 	"encoding/base64"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"os"
 
 	goface "github.com/Kagami/go-face"
 )
@@ -52,11 +55,22 @@ func (e *FaceEngine) EmbedBytes(imgBytes []byte) ([128]float32, BBox, error) {
 		return [128]float32{}, BBox{}, fmt.Errorf("recognize: %w", err)
 	}
 	if len(faces) == 0 {
-		return [128]float32{}, BBox{}, fmt.Errorf("no face detected in image")
+		return [128]float32{}, BBox{}, fmt.Errorf("no face detected")
 	}
 
 	f := faces[0]
 	r := f.Rectangle
+
+	// ✅ Reject faces smaller than 80x80 pixels
+	width := r.Max.X - r.Min.X
+	height := r.Max.Y - r.Min.Y
+	if width < 80 || height < 80 {
+		return [128]float32{}, BBox{}, fmt.Errorf(
+			"face too small (%dx%d) — minimum 80x80px required, use a clearer photo",
+			width, height,
+		)
+	}
+
 	bbox := BBox{r.Min.X, r.Min.Y, r.Max.X, r.Max.Y}
 	return f.Descriptor, bbox, nil
 }
@@ -82,4 +96,23 @@ func (e *FaceEngine) DetectBase64(b64 string) ([]DetectedFace, error) {
 		}
 	}
 	return result, nil
+}
+
+func SaveJPEG(img image.Image, path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return jpeg.Encode(f, img, &jpeg.Options{Quality: 90})
+}
+
+func SaveBase64ToFile(b64, path string) error {
+	// Decode base64
+	imgBytes, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return fmt.Errorf("decode base64: %w", err)
+	}
+	// Write raw bytes to file
+	return os.WriteFile(path, imgBytes, 0644)
 }

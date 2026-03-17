@@ -100,7 +100,7 @@ type Store struct {
 	cache *cache.Cache
 }
 
-func New(dbURL string) (*Store, error) {
+func New(dbURL string, c *cache.Cache) (*Store, error) {
 	db, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
@@ -116,7 +116,25 @@ func New(dbURL string) (*Store, error) {
 		return nil, fmt.Errorf("db ping: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"").Error; err != nil {
+		return nil, fmt.Errorf("uuid-ossp extension: %w", err)
+	}
+	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS vector").Error; err != nil {
+		return nil, fmt.Errorf("pgvector extension: %w", err)
+	}
+
+	if err := db.AutoMigrate(
+		&Plan{},
+		&User{},
+		&APIKey{},
+		&UsageLog{},
+		&Collection{},
+		&FaceEmbedding{},
+	); err != nil {
+		return nil, fmt.Errorf("automigrate: %w", err)
+	}
+
+	return &Store{db: db, cache: c}, nil
 }
 
 func (s *Store) Close() {
@@ -128,22 +146,24 @@ func (s *Store) Close() {
 // GetAPIKey looks up an active API key by its raw token.
 // Returns nil, nil if not found.
 func (s *Store) GetAPIKey(ctx context.Context, token string) (*APIKeyRecord, error) {
-	var key APIKey
+	var rec APIKeyRecord
 	err := s.db.WithContext(ctx).
-		Joins("JOIN users u ON u.id = api_keys.user_id").
-		Joins("JOIN plans p ON p.id = u.plan_id").
-		Where("api_keys.key_hash = ? AND api_keys.is_live = true", security.HashKey(token)).
-		Select("api_keys.id, api_keys.user_id, api_keys.is_live, p.call_limit").
-		First(&key).Error
-	if err != nil {
+		Raw(`
+			SELECT ak.id, ak.user_id, ak.is_live, p.call_limit
+			FROM api_keys ak
+			JOIN users u ON u.id = ak.user_id
+			JOIN plans p ON p.id = u.plan_id
+			WHERE ak.key_hash = ? AND ak.is_live = true
+			LIMIT 1
+		`, security.HashKey(token)).
+		Scan(&rec).Error
+	if err != nil || rec.ID == (uuid.UUID{}) {
+		fmt.Println("Error", err)
 		return nil, nil
 	}
-	return &APIKeyRecord{
-		ID:        key.ID,
-		UserID:    key.UserID,
-		CallLimit: key.User.Plan.CallLimit,
-		IsLive:    key.IsLive,
-	}, nil
+
+	fmt.Printf("DB lookup for API key successful: UserID=%s, CallLimit=%d\n", rec.UserID, rec.CallLimit)
+	return &rec, nil
 }
 
 func (s *Store) CreateAPIKey(ctx context.Context, req interfacex.CreateAPIKeyRequest) (*APIKeyRecord, string, error) {
@@ -178,6 +198,17 @@ func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
+func (s *Store) GetOrCreateCollection(ctx context.Context, userID uuid.UUID, name string) (*Collection, error) {
+	var col Collection
+	err := s.db.WithContext(ctx).
+		Where(Collection{UserID: userID, Name: name}).
+		FirstOrCreate(&col).Error
+	if err != nil {
+		return nil, fmt.Errorf("get or create collection: %w", err)
+	}
+	return &col, nil
+}
+
 func (s *Store) EnrollFace(ctx context.Context, collectionID uuid.UUID, personID string, embedding []float32, metadata string) error {
 	face := FaceEmbedding{
 		CollectionID: collectionID,
@@ -304,4 +335,16 @@ func (s *Store) CreatePlan(ctx context.Context, req interfacex.CreatePlanRequest
 	}
 
 	return &plan, nil
+}
+
+func (s *Store) ActivatePlan(ctx context.Context, userID uuid.UUID, planID uuid.UUID) (*User, error) {
+	if err := s.db.WithContext(ctx).First(&Plan{}, "id = ?", planID).Error; err != nil {
+		return nil, fmt.Errorf("plan not found")
+	}
+
+	if err := s.db.WithContext(ctx).Model(&User{}).Where("id = ?", userID).Update("plan_id", planID).Error; err != nil {
+		return nil, fmt.Errorf("db activate plan: %w", err)
+	}
+
+	return s.GetUserById(ctx, userID.String())
 }

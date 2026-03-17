@@ -26,19 +26,19 @@ func main() {
 	// Load .env (ignored in production if not present)
 	_ = godotenv.Load()
 
-	// ── Database ────────────────────────────────────────────────────────────
-	db, err := store.New(mustEnv("DB_URL"))
-	if err != nil {
-		log.Fatalf("db connect: %v", err)
-	}
-	defer db.Close()
-
 	// ── Redis ────────────────────────────────────────────────────────────────
 	rdb, err := cache.New(mustEnv("REDIS_URL"))
 	if err != nil {
 		log.Fatalf("redis connect: %v", err)
 	}
 	defer rdb.Close()
+
+	// ── Database ────────────────────────────────────────────────────────────
+	db, err := store.New(mustEnv("DB_URL"), rdb)
+	if err != nil {
+		log.Fatalf("db connect: %v", err)
+	}
+	defer db.Close()
 
 	// ── Face engine (go-face / dlib) ────────────────────────────────────────
 	modelsDir := getEnv("MODELS_DIR", "./models")
@@ -107,6 +107,7 @@ func main() {
 		authenticated.Use(auth.AuthenticatedUserMiddleware(db))
 		{
 			authenticated.POST("/api-keys", h.CreateAPIKey)
+			authenticated.POST("/plans/activate", h.ActivatePlan)
 
 			// authenticated.GET("/api-keys", h.ListAPIKeys)
 			// authenticated.DELETE("/api-keys/:id", h.DeleteAPIKey)

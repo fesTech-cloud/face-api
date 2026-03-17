@@ -12,7 +12,7 @@ type CreateAccountRequest struct {
 // TODO only Authenticated User Can Access
 type CreateAPIKeyRequest struct {
 	IsLive bool      `json:"is_live" binding:"required"`
-	UserID uuid.UUID `json:"user_id" binding:"required,uuid"`
+	UserID uuid.UUID `json:"user_id"`
 }
 
 type LoginRequest struct {
@@ -31,4 +31,8 @@ type CreatePlanRequest struct {
 	Name       string `json:"name" binding:"required"`
 	CallLimit  int    `json:"call_limit" binding:"required"`
 	PriceCents int    `json:"price_cents" binding:"required"`
+}
+
+type ActivatePlanRequest struct {
+	PlanID uuid.UUID `json:"plan_id" binding:"required"`
 }

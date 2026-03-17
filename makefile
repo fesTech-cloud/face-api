@@ -8,7 +8,7 @@ BIN_DIR    := ./bin
 BIN        := $(BIN_DIR)/$(APP_NAME)
 DOCKER_IMG := $(APP_NAME):latest
 GO         := go
-GOFLAGS    := CGO_ENABLED=1
+CGO_ENABLED := 1
 
 # Load .env if it exists (for local make targets)
 ifneq (,$(wildcard .env))
@@ -31,7 +31,7 @@ help: ## Show this help message
 
 .PHONY: run
 run: ## Run the server locally (no Docker)
-	@$(GOFLAGS) $(GO) run $(CMD_PATH)/...
+	@CGO_ENABLED=$(CGO_ENABLED) $(GO) run $(CMD_PATH)/...
 
 .PHONY: dev
 dev: ## Run with hot-reload using air
@@ -42,7 +42,7 @@ dev: ## Run with hot-reload using air
 build: ## Build the binary
 	@mkdir -p $(BIN_DIR)
 	@echo "Building $(APP_NAME)..."
-	@$(GOFLAGS) $(GO) build -ldflags="-w -s" -o $(BIN) $(CMD_PATH)
+	@CGO_ENABLED=$(CGO_ENABLED) $(GO) build -ldflags="-w -s" -o $(BIN) $(CMD_PATH)
 	@echo "Binary ready: $(BIN)"
 
 .PHONY: clean
@@ -56,22 +56,22 @@ clean: ## Remove build artifacts
 
 .PHONY: test
 test: ## Run all tests
-	@$(GOFLAGS) $(GO) test ./... -v -count=1
+	@CGO_ENABLED=$(CGO_ENABLED) $(GO) test ./... -v -count=1
 
 .PHONY: test-short
 test-short: ## Run tests without integration tests
-	@$(GOFLAGS) $(GO) test ./... -short -count=1
+	@CGO_ENABLED=$(CGO_ENABLED) $(GO) test ./... -short -count=1
 
 .PHONY: test-coverage
 test-coverage: ## Run tests with coverage report
 	@mkdir -p coverage
-	@$(GOFLAGS) $(GO) test ./... -coverprofile=coverage/coverage.out
+	@CGO_ENABLED=$(CGO_ENABLED) $(GO) test ./... -coverprofile=coverage/coverage.out
 	@$(GO) tool cover -html=coverage/coverage.out -o coverage/coverage.html
 	@echo "Coverage report: coverage/coverage.html"
 
 .PHONY: bench
 bench: ## Run benchmarks
-	@$(GOFLAGS) $(GO) test ./... -bench=. -benchmem
+	@CGO_ENABLED=$(CGO_ENABLED) $(GO) test ./... -bench=. -benchmem
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Code quality
@@ -91,7 +91,7 @@ fmt: ## Format all Go code
 
 .PHONY: vet
 vet: ## Run go vet
-	@$(GOFLAGS) $(GO) vet ./...
+	@CGO_ENABLED=$(CGO_ENABLED) $(GO) vet ./...
 
 .PHONY: tidy
 tidy: ## Tidy go.mod and go.sum

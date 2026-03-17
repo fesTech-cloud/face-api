@@ -23,7 +23,6 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 			return
 		}
 		token := strings.TrimPrefix(header, "Bearer ")
-
 		// Validate key against DB
 		keyRecord, err := db.GetAPIKeyCached(c.Request.Context(), token)
 		if err != nil || keyRecord == nil {
@@ -32,6 +31,8 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 			})
 			return
 		}
+
+		// fmt.Printf("API key valid for user ID: %s with call limit: %d\n", keyRecord.UserID, keyRecord.CallLimit)
 
 		// Check monthly quota via Redis
 		used, err := rdb.GetMonthlyUsage(c.Request.Context(), token)
@@ -85,7 +86,6 @@ func AuthenticatedUserMiddleware(db *store.Store) gin.HandlerFunc {
 			})
 			return
 		}
-
 		c.Set("user", user)
 		c.Next()
 	}
