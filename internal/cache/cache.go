@@ -56,3 +56,11 @@ func (c *Cache) IncrementUsage(ctx context.Context, apiKey string) error {
 	_, err := pipe.Exec(ctx)
 	return err
 }
+
+func (c *Cache) Get(ctx context.Context, key string) (string, error) {
+	return c.rdb.Get(ctx, key).Result()
+}
+
+func (c *Cache) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
+	return c.rdb.Set(ctx, key, value, ttl).Err()
+}

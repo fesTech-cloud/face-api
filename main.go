@@ -15,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"face-api/internal/api"
+	"face-api/internal/api/dasboard"
 	"face-api/internal/auth"
 	"face-api/internal/cache"
 	"face-api/internal/engine"
@@ -78,19 +79,38 @@ func main() {
 	})
 
 	// Authenticated API routes
-	v1 := r.Group("/v1")
-	v1.Use(auth.APIKeyMiddleware(db, rdb))
+	face := r.Group("/face")
+	face.Use(auth.APIKeyMiddleware(db, rdb))
 	{
 		h := api.NewHandler(db, rdb, faceEngine)
 
-		v1.POST("/match", h.Match)
-		v1.POST("/verify", h.Verify)
-		v1.POST("/detect", h.Detect)
-		v1.POST("/enroll", h.Enroll)
-		v1.POST("/search", h.Search)
-		v1.GET("/collections", h.ListCollections)
-		v1.DELETE("/collections/:id", h.DeleteCollection)
-		v1.GET("/usage", h.Usage)
+		face.POST("/match", h.Match)
+		face.POST("/verify", h.Verify)
+		face.POST("/detect", h.Detect)
+		face.POST("/enroll", h.Enroll)
+		face.POST("/search", h.Search)
+		face.GET("/collections", h.ListCollections)
+		face.DELETE("/collections/:id", h.DeleteCollection)
+		face.GET("/usage", h.Usage)
+	}
+
+	dashboardRoute := r.Group("/dashboard")
+	{
+		h := dasboard.NewDashboardHandler(db)
+
+		dashboardRoute.POST("/signup", h.CreateAccount)
+		dashboardRoute.POST("/login", h.Login)
+		dashboardRoute.GET("/plans", h.GetPlans)
+		dashboardRoute.POST("/plans", h.CreatePlan)
+
+		authenticated := dashboardRoute.Group("/")
+		authenticated.Use(auth.AuthenticatedUserMiddleware(db))
+		{
+			authenticated.POST("/api-keys", h.CreateAPIKey)
+
+			// authenticated.GET("/api-keys", h.ListAPIKeys)
+			// authenticated.DELETE("/api-keys/:id", h.DeleteAPIKey)
+		}
 	}
 
 	// ── Graceful shutdown ───────────────────────────────────────────────────

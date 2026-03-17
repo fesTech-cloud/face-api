@@ -127,6 +127,7 @@ func (h *Handler) Enroll(c *gin.Context) {
 	var req struct {
 		Collection string `json:"collection" binding:"required"`
 		PersonID   string `json:"person_id"  binding:"required"`
+		Metadata   string `json:"metadata"`
 		Image      string `json:"image"      binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -141,6 +142,12 @@ func (h *Handler) Enroll(c *gin.Context) {
 	}
 
 	// TODO: store embedding in DB under collection
+
+	err = h.db.EnrollFace(c.Request.Context(), uuid.New(), req.PersonID, emb[:], req.Metadata)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enroll face"})
+		return
+	}
 	_ = emb
 
 	c.JSON(http.StatusOK, gin.H{
@@ -179,6 +186,11 @@ func (h *Handler) Search(c *gin.Context) {
 	}
 
 	// TODO: pgvector similarity search against collection
+	_, err = h.db.SearchFaces(c.Request.Context(), uuid.New(), []float32{}, req.TopK)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "search failed"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"collection": req.Collection,
 		"results":    []gin.H{},
