@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/jpeg"
 	"os"
+	"strings"
 
 	goface "github.com/Kagami/go-face"
 )
@@ -20,8 +21,9 @@ type BBox [4]int
 
 // DetectedFace is returned from Detect.
 type DetectedFace struct {
-	BBox       BBox    `json:"bbox"`
-	Confidence float64 `json:"confidence"`
+	BBox       BBox         `json:"bbox"`
+	Confidence float64      `json:"confidence"`
+	Embedding  [128]float32 `json:"-"`
 }
 
 // New initialises the face recognizer with models from modelsDir.
@@ -41,9 +43,17 @@ func (e *FaceEngine) Close() {
 // EmbedBase64 decodes a base64 image, detects the first face,
 // and returns its 128-dim embedding + bounding box.
 func (e *FaceEngine) EmbedBase64(b64 string) ([128]float32, BBox, error) {
+	// Strip data URI prefix if present (e.g. "data:image/jpeg;base64,...")
+	if idx := strings.Index(b64, ","); idx != -1 {
+		b64 = b64[idx+1:]
+	}
 	imgBytes, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		return [128]float32{}, BBox{}, fmt.Errorf("base64 decode: %w", err)
+		// Fall back to URL-safe encoding
+		imgBytes, err = base64.URLEncoding.DecodeString(b64)
+		if err != nil {
+			return [128]float32{}, BBox{}, fmt.Errorf("base64 decode: %w", err)
+		}
 	}
 	return e.EmbedBytes(imgBytes)
 }
@@ -75,11 +85,19 @@ func (e *FaceEngine) EmbedBytes(imgBytes []byte) ([128]float32, BBox, error) {
 	return f.Descriptor, bbox, nil
 }
 
-// DetectBase64 returns all detected faces with bounding boxes.
+// DetectBase64 returns all detected faces with bounding boxes and embeddings.
 func (e *FaceEngine) DetectBase64(b64 string) ([]DetectedFace, error) {
+	// Strip data URI prefix if present (e.g. "data:image/jpeg;base64,...")
+	if idx := strings.Index(b64, ","); idx != -1 {
+		b64 = b64[idx+1:]
+	}
 	imgBytes, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		return nil, fmt.Errorf("base64 decode: %w", err)
+		// Fall back to URL-safe encoding
+		imgBytes, err = base64.URLEncoding.DecodeString(b64)
+		if err != nil {
+			return nil, fmt.Errorf("base64 decode: %w", err)
+		}
 	}
 
 	faces, err := e.rec.Recognize(imgBytes)
@@ -93,6 +111,7 @@ func (e *FaceEngine) DetectBase64(b64 string) ([]DetectedFace, error) {
 		result[i] = DetectedFace{
 			BBox:       BBox{r.Min.X, r.Min.Y, r.Max.X, r.Max.Y},
 			Confidence: 0.9, // go-face doesn't expose raw confidence; placeholder
+			Embedding:  f.Descriptor,
 		}
 	}
 	return result, nil

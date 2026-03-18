@@ -31,9 +31,6 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 			})
 			return
 		}
-
-		// fmt.Printf("API key valid for user ID: %s with call limit: %d\n", keyRecord.UserID, keyRecord.CallLimit)
-
 		// Check monthly quota via Redis
 		used, err := rdb.GetMonthlyUsage(c.Request.Context(), token)
 		if err == nil && used >= int64(keyRecord.CallLimit) {

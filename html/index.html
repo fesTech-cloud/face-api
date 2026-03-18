@@ -628,8 +628,73 @@
         transition: width 0.6s ease;
       }
 
-      /* JSON output */
-      .json-out {
+      /* Search result cards */
+      .search-result-card {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 12px 14px;
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .search-result-card .sr-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .search-result-card .sr-person {
+        font-family: var(--mono);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--green);
+      }
+
+      .search-result-card .sr-badge {
+        font-family: var(--mono);
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 20px;
+        background: var(--green-dim);
+        color: var(--green);
+      }
+
+      .search-result-card .sr-row {
+        display: flex;
+        gap: 6px;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--muted);
+      }
+
+      .search-result-card .sr-row span {
+        color: var(--text);
+      }
+
+      .search-results-wrap {
+        display: none;
+        flex-direction: column;
+        gap: 4px;
+        margin-bottom: 14px;
+      }
+
+      .search-results-wrap.visible {
+        display: flex;
+      }
+
+      .search-results-title {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--muted);
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+
+
         font-family: var(--mono);
         font-size: 11px;
         line-height: 1.7;
@@ -1221,6 +1286,10 @@
             <label>Person ID</label>
             <input type="text" id="enrollPersonId" placeholder="e.g. emp_42" />
           </div>
+          <div class="field">
+            <label>Metadata <span style="color:var(--muted);font-size:9px;letter-spacing:0">(optional — any extra info e.g. name, department)</span></label>
+            <input type="text" id="enrollMetadata" placeholder="e.g. name=John Doe,dept=engineering" />
+          </div>
           <div
             class="upload-zone"
             style="max-width: 360px"
@@ -1417,6 +1486,12 @@
             </div>
           </div>
 
+          <!-- Search results -->
+          <div class="search-results-wrap" id="searchResultsWrap">
+            <div class="search-results-title">MATCHED FACES</div>
+            <div id="searchResultsList"></div>
+          </div>
+
           <!-- Raw JSON -->
           <div class="panel-title">RAW JSON</div>
           <div class="json-out" id="jsonOut">// Response will appear here</div>
@@ -1506,27 +1581,44 @@
           const isMatch = data.match === true;
           $("matchCard").classList.add("visible");
           $("matchLabel").textContent = isMatch ? "✓ MATCH" : "✗ NO MATCH";
-          $("matchLabel").className =
-            "result-match " + (isMatch ? "yes" : "no");
-          $("matchSub").textContent = isMatch
-            ? "Same person detected"
-            : "Different people";
+          $("matchLabel").className = "result-match " + (isMatch ? "yes" : "no");
+          $("matchSub").textContent = isMatch ? "Same person detected" : "Different people";
           $("metricDist").textContent = data.distance?.toFixed(4) ?? "—";
-          $("metricConf").textContent = data.confidence
-            ? (data.confidence * 100).toFixed(1) + "%"
-            : "—";
-          $("metricElapsed").textContent = data.elapsed_ms
-            ? data.elapsed_ms + "ms"
-            : "—";
+          $("metricConf").textContent = data.confidence ? (data.confidence * 100).toFixed(1) + "%" : "—";
+          $("metricElapsed").textContent = data.elapsed_ms ? data.elapsed_ms + "ms" : "—";
           $("metricCallId").textContent = data.call_id ?? "—";
           const pct = Math.round((data.confidence ?? 0) * 100);
           $("confPct").textContent = pct + "%";
           $("confBar").style.width = pct + "%";
-          $("confBar").style.background = isMatch
-            ? "var(--green)"
-            : "var(--red)";
+          $("confBar").style.background = isMatch ? "var(--green)" : "var(--red)";
         } else {
           $("matchCard").classList.remove("visible");
+        }
+
+        // Fill search results if applicable
+        if (Array.isArray(data.results) && data.results.length > 0 && data.results[0].face_id) {
+          const list = $("searchResultsList");
+          list.innerHTML = "";
+          data.results.forEach((r, i) => {
+            const enrolled = r.enrolled_at ? new Date(r.enrolled_at).toLocaleString() : "—";
+            const conf = r.confidence ? (r.confidence * 100).toFixed(1) + "%" : "—";
+            const dist = r.distance ? r.distance.toFixed(4) : "—";
+            list.innerHTML += `
+              <div class="search-result-card">
+                <div class="sr-header">
+                  <span class="sr-person">${r.person_id}</span>
+                  <span class="sr-badge">#${i + 1} · ${conf}</span>
+                </div>
+                <div class="sr-row">Collection: <span>${r.collection_name}</span></div>
+                <div class="sr-row">Distance: <span>${dist}</span></div>
+                <div class="sr-row">Face ID: <span>${r.face_id}</span></div>
+                ${r.metadata ? `<div class="sr-row">Metadata: <span>${r.metadata}</span></div>` : ""}
+                <div class="sr-row">Enrolled: <span>${enrolled}</span></div>
+              </div>`;
+          });
+          $("searchResultsWrap").classList.add("visible");
+        } else {
+          $("searchResultsWrap").classList.remove("visible");
         }
       }
 
@@ -1534,6 +1626,8 @@
         $("statusPill").className = "status-pill";
         $("jsonOut").textContent = "// Response will appear here";
         $("matchCard").classList.remove("visible");
+        $("searchResultsWrap").classList.remove("visible");
+        $("searchResultsList").innerHTML = "";
       }
 
       function addLog(msg, type = "") {
@@ -1735,6 +1829,7 @@
       async function runEnroll() {
         const collection = $("enrollCollection").value.trim();
         const person_id = $("enrollPersonId").value.trim();
+        const metadata = $("enrollMetadata").value.trim();
         const f = $("fileEnroll").files[0];
         if (!collection || !person_id || !f) {
           alert("Fill in all fields and upload a photo.");
@@ -1744,7 +1839,7 @@
         await callAPI(
           "POST",
           "/face/enroll",
-          { collection, person_id, image },
+          { collection, person_id, image, metadata },
           "enrollSpinner",
         );
       }
@@ -1782,7 +1877,7 @@
       async function startCamera() {
         try {
           cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 640, height: 480, facingMode: "user" },
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
           });
           $("cameraFeed").srcObject = cameraStream;
           $("cameraOverlay").classList.add("hidden");
@@ -1812,15 +1907,16 @@
       function captureFrame() {
         const video = $("cameraFeed");
         const canvas = document.createElement("canvas");
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 480;
-        canvas.getContext("2d").drawImage(video, 0, 0);
-        const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 1.0);
         capturedSelfieB64 = dataUrl.split(",")[1];
         const img = $("capturedSelfie");
         img.src = dataUrl;
         img.style.display = "block";
-        addLog("Selfie captured ✓", "log-ok");
+        addLog(`Selfie captured ✓ (${canvas.width}x${canvas.height})`, "log-ok");
       }
 
       // Auto ping on load

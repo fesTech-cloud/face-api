@@ -8,6 +8,7 @@ import (
 	"face-api/x/interfacex"
 	"face-api/x/security"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -79,12 +80,22 @@ type FaceEmbedding struct {
 	CollectionID uuid.UUID       `gorm:"type:uuid;not null;index:idx_face_embeddings_collection"`
 	Collection   Collection      `gorm:"foreignKey:CollectionID"`
 	PersonID     string          `gorm:"not null"`
-	Embedding    pgvector.Vector // ← pgvector type inside GORM model
+	Embedding    pgvector.Vector `gorm:"type:vector(128)"`
 	Metadata     string
 	CreatedAt    time.Time
 }
 
-// ── APIKeyRecord is the lightweight DTO returned to callers ───────────────────
+// FaceSearchResult is the enriched DTO returned from SearchFaces.
+type FaceSearchResult struct {
+	FaceID         uuid.UUID `json:"face_id"`
+	PersonID       string    `json:"person_id"`
+	Metadata       string    `json:"metadata"`
+	Distance       float64   `json:"distance"`
+	Confidence     float64   `json:"confidence"`
+	EnrolledAt     time.Time `json:"enrolled_at"`
+	CollectionID   uuid.UUID `json:"collection_id"`
+	CollectionName string    `json:"collection_name"`
+}
 
 type APIKeyRecord struct {
 	ID        uuid.UUID
@@ -162,7 +173,6 @@ func (s *Store) GetAPIKey(ctx context.Context, token string) (*APIKeyRecord, err
 		return nil, nil
 	}
 
-	fmt.Printf("DB lookup for API key successful: UserID=%s, CallLimit=%d\n", rec.UserID, rec.CallLimit)
 	return &rec, nil
 }
 
@@ -219,26 +229,43 @@ func (s *Store) EnrollFace(ctx context.Context, collectionID uuid.UUID, personID
 	return s.db.WithContext(ctx).Create(&face).Error
 }
 
-func (s *Store) SearchFaces(ctx context.Context, collectionID uuid.UUID, queryEmbedding []float32, limit int) ([]FaceEmbedding, error) {
-	var results []FaceEmbedding
+func (s *Store) SearchFaces(ctx context.Context, collectionID uuid.UUID, queryEmbedding []float32, limit int) ([]FaceSearchResult, error) {
+	var results []FaceSearchResult
 
-	// Wrap the embedding as pgvector type
 	vec := pgvector.NewVector(queryEmbedding)
 
 	err := s.db.WithContext(ctx).
 		Raw(`
-            SELECT *, embedding <-> ? AS distance
-            FROM face_embeddings
-            WHERE collection_id = ?
-              AND embedding <-> ? < 0.6
-            ORDER BY distance
-            LIMIT ?
-        `, vec, collectionID, vec, limit).
+			SELECT
+				fe.id          AS face_id,
+				fe.person_id,
+				fe.metadata,
+				fe.created_at  AS enrolled_at,
+				fe.collection_id,
+				c.name         AS collection_name,
+				(fe.embedding <-> ?::vector) AS distance
+			FROM face_embeddings fe
+			JOIN collections c ON c.id = fe.collection_id
+			WHERE fe.collection_id = ?
+			  AND (fe.embedding <-> ?::vector) < 0.6
+			ORDER BY distance ASC
+			LIMIT ?
+		`, vec, collectionID, vec, limit).
 		Scan(&results).Error
 
 	if err != nil {
 		return nil, err
 	}
+
+	// Compute confidence from distance: 1 - (dist / 1.2), clamped to [0, 1]
+	for i, r := range results {
+		conf := 1.0 - (r.Distance / 1.2)
+		if conf < 0 {
+			conf = 0
+		}
+		results[i].Confidence = math.Round(conf*10000) / 10000
+	}
+
 	return results, nil
 }
 
@@ -347,4 +374,57 @@ func (s *Store) ActivatePlan(ctx context.Context, userID uuid.UUID, planID uuid.
 	}
 
 	return s.GetUserById(ctx, userID.String())
+}
+
+// GetUserCollections returns all collections for a given user.
+func (s *Store) GetUserCollections(ctx context.Context, userID uuid.UUID) ([]Collection, error) {
+	var collections []Collection
+	err := s.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Find(&collections).Error
+	if err != nil {
+		return nil, fmt.Errorf("get user collections: %w", err)
+	}
+	return collections, nil
+}
+
+// SearchFacesAcrossCollections searches for matching faces across all collections for a user.
+func (s *Store) SearchFacesAcrossCollections(ctx context.Context, userID uuid.UUID, queryEmbedding []float32, limit int) ([]FaceSearchResult, error) {
+	var results []FaceSearchResult
+
+	vec := pgvector.NewVector(queryEmbedding)
+
+	err := s.db.WithContext(ctx).
+		Raw(`
+			SELECT
+				fe.id          AS face_id,
+				fe.person_id,
+				fe.metadata,
+				fe.created_at  AS enrolled_at,
+				fe.collection_id,
+				c.name         AS collection_name,
+				(fe.embedding <-> ?::vector) AS distance
+			FROM face_embeddings fe
+			JOIN collections c ON c.id = fe.collection_id
+			WHERE c.user_id = ?
+			  AND (fe.embedding <-> ?::vector) < 0.6
+			ORDER BY distance ASC
+			LIMIT ?
+		`, vec, userID, vec, limit).
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute confidence from distance: 1 - (dist / 1.2), clamped to [0, 1]
+	for i, r := range results {
+		conf := 1.0 - (r.Distance / 1.2)
+		if conf < 0 {
+			conf = 0
+		}
+		results[i].Confidence = math.Round(conf*10000) / 10000
+	}
+
+	return results, nil
 }

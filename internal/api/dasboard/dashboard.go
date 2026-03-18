@@ -56,13 +56,11 @@ func (h *DashboardHandler) CreateAPIKey(c *gin.Context) {
 		return
 	}
 
-
 	user, ok := userInterface.(*store.User)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user type in context"})
 		return
 	}
-
 
 	req.UserID = user.ID
 	keyRecord, key, err := h.db.CreateAPIKey(c.Request.Context(), req)

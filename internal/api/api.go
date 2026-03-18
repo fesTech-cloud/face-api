@@ -1,10 +1,9 @@
 package api
 
 import (
-	"log"
+	"fmt"
 	"math"
 	"net/http"
-	"os"
 	"path/filepath"
 	"runtime"
 
@@ -49,19 +48,19 @@ func (h *Handler) Match(c *gin.Context) {
 		return
 	}
 
-	callID := "cm_" + uuid.New().String()[:8]
+	// callID := "cm_" + uuid.New().String()[:8]
 
-	outDir := matchesDir()
-	if err := os.MkdirAll(outDir, 0755); err != nil {
-		log.Printf("matches dir: %v", err)
-	} else {
-		if err := engine.SaveBase64ToFile(req.ImageA, filepath.Join(outDir, callID+"_a.jpg")); err != nil {
-			log.Printf("save image_a: %v", err)
-		}
-		if err := engine.SaveBase64ToFile(req.ImageB, filepath.Join(outDir, callID+"_b.jpg")); err != nil {
-			log.Printf("save image_b: %v", err)
-		}
-	}
+	// outDir := matchesDir()
+	// if err := os.MkdirAll(outDir, 0755); err != nil {
+	// 	log.Printf("matches dir: %v", err)
+	// } else {
+	// 	if err := engine.SaveBase64ToFile(req.ImageA, filepath.Join(outDir, callID+"_a.jpg")); err != nil {
+	// 		log.Printf("save image_a: %v", err)
+	// 	}
+	// 	if err := engine.SaveBase64ToFile(req.ImageB, filepath.Join(outDir, callID+"_b.jpg")); err != nil {
+	// 		log.Printf("save image_b: %v", err)
+	// 	}
+	// }
 
 	embA, bboxA, err := h.engine.EmbedBase64(req.ImageA)
 	if err != nil {
@@ -84,7 +83,7 @@ func (h *Handler) Match(c *gin.Context) {
 		"confidence": round(conf, 4),
 		"face_a":     gin.H{"detected": true, "bbox": bboxA},
 		"face_b":     gin.H{"detected": true, "bbox": bboxB},
-		"call_id":    callID,
+		// "call_id":    callID,
 	})
 }
 
@@ -109,6 +108,7 @@ func (h *Handler) Verify(c *gin.Context) {
 
 	embID, _, err := h.engine.EmbedBase64(req.IDPhoto)
 	if err != nil {
+		fmt.Printf("ID photo embedding error: %v\n", err)
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "id_photo: " + err.Error()})
 		return
 	}
@@ -141,9 +141,40 @@ func (h *Handler) Detect(c *gin.Context) {
 		return
 	}
 
+	// Get user ID from context (set by auth middleware)
+	userID, _ := uuid.Parse(c.GetString("user_id"))
+
+	// Build response with collection matches for each face
+	type FaceResponse struct {
+		BBox       engine.BBox              `json:"bbox"`
+		Confidence float64                  `json:"confidence"`
+		Matches    []store.FaceSearchResult `json:"matches,omitempty"`
+	}
+
+	response := make([]FaceResponse, len(faces))
+	for i, face := range faces {
+		response[i] = FaceResponse{
+			BBox:       face.BBox,
+			Confidence: face.Confidence,
+		}
+
+		// Search for matches across all user's collections
+		if userID != (uuid.UUID{}) {
+			matches, err := h.db.SearchFacesAcrossCollections(
+				c.Request.Context(),
+				userID,
+				face.Embedding[:],
+				5, // top 5 matches per face
+			)
+			if err == nil && len(matches) > 0 {
+				response[i].Matches = matches
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"count": len(faces),
-		"faces": faces,
+		"faces": response,
 	})
 }
 
@@ -209,22 +240,29 @@ func (h *Handler) Search(c *gin.Context) {
 		req.Threshold = 0.6
 	}
 
-	_, _, err := h.engine.EmbedBase64(req.Image)
+	emb, _, err := h.engine.EmbedBase64(req.Image)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	}
 
-	// TODO: pgvector similarity search against collection
-	_, err = h.db.SearchFaces(c.Request.Context(), uuid.New(), []float32{}, req.TopK)
+	userID, _ := uuid.Parse(c.GetString("user_id"))
+	col, err := h.db.GetOrCreateCollection(c.Request.Context(), userID, req.Collection)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "search failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve collection"})
+		return
+	}
+
+	results, err := h.db.SearchFaces(c.Request.Context(), col.ID, emb[:], req.TopK)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "search failed", "detail": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"collection": req.Collection,
-		"results":    []gin.H{},
-		"count":      0,
+		"threshold":  req.Threshold,
+		"results":    results,
+		"count":      len(results),
 	})
 }
 
