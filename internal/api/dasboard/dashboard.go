@@ -1,23 +1,27 @@
 package dasboard
 
 import (
-	"face-api/internal/store"
-	"face-api/x/interfacex"
-	"face-api/x/security"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
+
+	"face-api/internal/cache"
+	"face-api/internal/store"
+	"face-api/x/interfacex"
+	"face-api/x/security"
 )
 
 type DashboardHandler struct {
 	db        *store.Store
+	cache     *cache.Cache
 	validator *validator.Validate
 }
 
-func NewDashboardHandler(db *store.Store) *DashboardHandler {
-	return &DashboardHandler{db: db, validator: validator.New()}
+func NewDashboardHandler(db *store.Store, c *cache.Cache) *DashboardHandler {
+	return &DashboardHandler{db: db, cache: c, validator: validator.New()}
 }
 
 func (h *DashboardHandler) CreateAccount(c *gin.Context) {
@@ -73,6 +77,13 @@ func (h *DashboardHandler) CreateAPIKey(c *gin.Context) {
 }
 
 func (h *DashboardHandler) Login(c *gin.Context) {
+	// Rate limit: max 10 attempts per IP per minute
+	allowed, _ := h.cache.CheckLoginRateLimit(c.Request.Context(), c.ClientIP(), 10, time.Minute)
+	if !allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many login attempts, please try again later"})
+		return
+	}
+
 	var req interfacex.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -87,6 +98,11 @@ func (h *DashboardHandler) Login(c *gin.Context) {
 
 	user, err := h.db.GetUserByEmail(c.Request.Context(), req.Email)
 	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	if !security.ComparePassword(user.PasswordHash, req.Password) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
@@ -136,6 +152,35 @@ func (h *DashboardHandler) CreatePlan(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "plan created successfully", "plan": plan})
+}
+
+func (h *DashboardHandler) ListAPIKeys(c *gin.Context) {
+	user := c.MustGet("user").(*store.User)
+
+	keys, err := h.db.ListAPIKeys(c.Request.Context(), user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list API keys"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"api_keys": keys, "count": len(keys)})
+}
+
+func (h *DashboardHandler) DeleteAPIKey(c *gin.Context) {
+	keyID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid key id"})
+		return
+	}
+
+	user := c.MustGet("user").(*store.User)
+
+	if err := h.db.DeleteAPIKey(c.Request.Context(), user.ID, keyID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"revoked": true, "key_id": keyID})
 }
 
 func (h *DashboardHandler) ActivatePlan(c *gin.Context) {

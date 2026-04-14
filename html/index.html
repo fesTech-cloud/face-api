@@ -694,7 +694,7 @@
         margin-bottom: 6px;
       }
 
-
+      .json-out {
         font-family: var(--mono);
         font-size: 11px;
         line-height: 1.7;
@@ -927,7 +927,11 @@
         <!-- /signup -->
         <div class="ep-panel" id="panel-signup">
           <div class="ep-header">
-            <span class="method-badge post" style="font-size: 11px; padding: 4px 10px">POST</span>
+            <span
+              class="method-badge post"
+              style="font-size: 11px; padding: 4px 10px"
+              >POST</span
+            >
             <span class="ep-path">/dashboard/signup</span>
           </div>
           <p class="ep-desc">Create a new account. Requires a valid plan ID.</p>
@@ -937,15 +941,27 @@
           </div>
           <div class="field">
             <label>Email</label>
-            <input type="email" id="signupEmail" placeholder="you@example.com" />
+            <input
+              type="email"
+              id="signupEmail"
+              placeholder="you@example.com"
+            />
           </div>
           <div class="field">
             <label>Password</label>
-            <input type="password" id="signupPassword" placeholder="min 8 characters" />
+            <input
+              type="password"
+              id="signupPassword"
+              placeholder="min 8 characters"
+            />
           </div>
           <div class="field">
             <label>Plan ID (UUID)</label>
-            <input type="text" id="signupPlanId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+            <input
+              type="text"
+              id="signupPlanId"
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            />
           </div>
           <button class="btn btn-green btn-full" onclick="runSignup()">
             <div class="spinner" id="signupSpinner"></div>
@@ -956,17 +972,27 @@
         <!-- /login -->
         <div class="ep-panel" id="panel-login">
           <div class="ep-header">
-            <span class="method-badge post" style="font-size: 11px; padding: 4px 10px">POST</span>
+            <span
+              class="method-badge post"
+              style="font-size: 11px; padding: 4px 10px"
+              >POST</span
+            >
             <span class="ep-path">/dashboard/login</span>
           </div>
-          <p class="ep-desc">Login and receive a PASETO token for authenticated endpoints.</p>
+          <p class="ep-desc">
+            Login and receive a PASETO token for authenticated endpoints.
+          </p>
           <div class="field">
             <label>Email</label>
             <input type="email" id="loginEmail" placeholder="you@example.com" />
           </div>
           <div class="field">
             <label>Password</label>
-            <input type="password" id="loginPassword" placeholder="your password" />
+            <input
+              type="password"
+              id="loginPassword"
+              placeholder="your password"
+            />
           </div>
           <button class="btn btn-green btn-full" onclick="runLogin()">
             <div class="spinner" id="loginSpinner"></div>
@@ -977,10 +1003,17 @@
         <!-- /api-keys -->
         <div class="ep-panel" id="panel-api-keys">
           <div class="ep-header">
-            <span class="method-badge post" style="font-size: 11px; padding: 4px 10px">POST</span>
+            <span
+              class="method-badge post"
+              style="font-size: 11px; padding: 4px 10px"
+              >POST</span
+            >
             <span class="ep-path">/dashboard/api-keys</span>
           </div>
-          <p class="ep-desc">Create an API key. Requires a valid Bearer token in the API Key field.</p>
+          <p class="ep-desc">
+            Create an API key. Requires a valid Bearer token in the API Key
+            field.
+          </p>
           <div class="field">
             <label>Key Type</label>
             <select id="apiKeyIsLive">
@@ -997,7 +1030,11 @@
         <!-- GET /plans -->
         <div class="ep-panel" id="panel-plans-get">
           <div class="ep-header">
-            <span class="method-badge get" style="font-size: 11px; padding: 4px 10px">GET</span>
+            <span
+              class="method-badge get"
+              style="font-size: 11px; padding: 4px 10px"
+              >GET</span
+            >
             <span class="ep-path">/dashboard/plans</span>
           </div>
           <p class="ep-desc">List all available subscription plans.</p>
@@ -1010,7 +1047,11 @@
         <!-- POST /plans -->
         <div class="ep-panel" id="panel-plans-post">
           <div class="ep-header">
-            <span class="method-badge post" style="font-size: 11px; padding: 4px 10px">POST</span>
+            <span
+              class="method-badge post"
+              style="font-size: 11px; padding: 4px 10px"
+              >POST</span
+            >
             <span class="ep-path">/dashboard/plans</span>
           </div>
           <p class="ep-desc">Create a new subscription plan.</p>
@@ -1020,11 +1061,21 @@
           </div>
           <div class="field">
             <label>Call Limit</label>
-            <input type="number" id="planCallLimit" placeholder="e.g. 5000" min="1" />
+            <input
+              type="number"
+              id="planCallLimit"
+              placeholder="e.g. 5000"
+              min="1"
+            />
           </div>
           <div class="field">
             <label>Price (cents)</label>
-            <input type="number" id="planPriceCents" placeholder="e.g. 2900" min="0" />
+            <input
+              type="number"
+              id="planPriceCents"
+              placeholder="e.g. 2900"
+              min="0"
+            />
           </div>
           <button class="btn btn-green btn-full" onclick="runCreatePlan()">
             <div class="spinner" id="plansPostSpinner"></div>
@@ -1035,13 +1086,24 @@
         <!-- /plans/activate -->
         <div class="ep-panel" id="panel-plans-activate">
           <div class="ep-header">
-            <span class="method-badge post" style="font-size: 11px; padding: 4px 10px">POST</span>
+            <span
+              class="method-badge post"
+              style="font-size: 11px; padding: 4px 10px"
+              >POST</span
+            >
             <span class="ep-path">/dashboard/plans/activate</span>
           </div>
-          <p class="ep-desc">Switch the authenticated user's active plan. Requires a Bearer token.</p>
+          <p class="ep-desc">
+            Switch the authenticated user's active plan. Requires a Bearer
+            token.
+          </p>
           <div class="field">
             <label>Plan ID (UUID)</label>
-            <input type="text" id="activatePlanId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+            <input
+              type="text"
+              id="activatePlanId"
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            />
           </div>
           <button class="btn btn-green btn-full" onclick="runActivatePlan()">
             <div class="spinner" id="activatePlanSpinner"></div>
@@ -1287,8 +1349,18 @@
             <input type="text" id="enrollPersonId" placeholder="e.g. emp_42" />
           </div>
           <div class="field">
-            <label>Metadata <span style="color:var(--muted);font-size:9px;letter-spacing:0">(optional — any extra info e.g. name, department)</span></label>
-            <input type="text" id="enrollMetadata" placeholder="e.g. name=John Doe,dept=engineering" />
+            <label
+              >Metadata
+              <span
+                style="color: var(--muted); font-size: 9px; letter-spacing: 0"
+                >(optional — any extra info e.g. name, department)</span
+              ></label
+            >
+            <input
+              type="text"
+              id="enrollMetadata"
+              placeholder="e.g. name=John Doe,dept=engineering"
+            />
           </div>
           <div
             class="upload-zone"
@@ -1581,27 +1653,44 @@
           const isMatch = data.match === true;
           $("matchCard").classList.add("visible");
           $("matchLabel").textContent = isMatch ? "✓ MATCH" : "✗ NO MATCH";
-          $("matchLabel").className = "result-match " + (isMatch ? "yes" : "no");
-          $("matchSub").textContent = isMatch ? "Same person detected" : "Different people";
+          $("matchLabel").className =
+            "result-match " + (isMatch ? "yes" : "no");
+          $("matchSub").textContent = isMatch
+            ? "Same person detected"
+            : "Different people";
           $("metricDist").textContent = data.distance?.toFixed(4) ?? "—";
-          $("metricConf").textContent = data.confidence ? (data.confidence * 100).toFixed(1) + "%" : "—";
-          $("metricElapsed").textContent = data.elapsed_ms ? data.elapsed_ms + "ms" : "—";
+          $("metricConf").textContent = data.confidence
+            ? (data.confidence * 100).toFixed(1) + "%"
+            : "—";
+          $("metricElapsed").textContent = data.elapsed_ms
+            ? data.elapsed_ms + "ms"
+            : "—";
           $("metricCallId").textContent = data.call_id ?? "—";
           const pct = Math.round((data.confidence ?? 0) * 100);
           $("confPct").textContent = pct + "%";
           $("confBar").style.width = pct + "%";
-          $("confBar").style.background = isMatch ? "var(--green)" : "var(--red)";
+          $("confBar").style.background = isMatch
+            ? "var(--green)"
+            : "var(--red)";
         } else {
           $("matchCard").classList.remove("visible");
         }
 
         // Fill search results if applicable
-        if (Array.isArray(data.results) && data.results.length > 0 && data.results[0].face_id) {
+        if (
+          Array.isArray(data.results) &&
+          data.results.length > 0 &&
+          data.results[0].face_id
+        ) {
           const list = $("searchResultsList");
           list.innerHTML = "";
           data.results.forEach((r, i) => {
-            const enrolled = r.enrolled_at ? new Date(r.enrolled_at).toLocaleString() : "—";
-            const conf = r.confidence ? (r.confidence * 100).toFixed(1) + "%" : "—";
+            const enrolled = r.enrolled_at
+              ? new Date(r.enrolled_at).toLocaleString()
+              : "—";
+            const conf = r.confidence
+              ? (r.confidence * 100).toFixed(1) + "%"
+              : "—";
             const dist = r.distance ? r.distance.toFixed(4) : "—";
             list.innerHTML += `
               <div class="search-result-card">
@@ -1722,7 +1811,12 @@
           alert("Please fill in all fields.");
           return;
         }
-        await callAPI("POST", "/dashboard/signup", { brand_name, email, password, plan_id }, "signupSpinner");
+        await callAPI(
+          "POST",
+          "/dashboard/signup",
+          { brand_name, email, password, plan_id },
+          "signupSpinner",
+        );
       }
 
       // ── /login ────────────────────────────────────────────────────────────────────
@@ -1733,7 +1827,12 @@
           alert("Please enter email and password.");
           return;
         }
-        const data = await callAPI("POST", "/dashboard/login", { email, password }, "loginSpinner");
+        const data = await callAPI(
+          "POST",
+          "/dashboard/login",
+          { email, password },
+          "loginSpinner",
+        );
         if (data?.token) {
           $("authToken").value = data.token;
           updateTokenIndicators();
@@ -1744,7 +1843,12 @@
       // ── /api-keys ─────────────────────────────────────────────────────────────────
       async function runCreateAPIKey() {
         const is_live = $("apiKeyIsLive").value === "true";
-        await callAPI("POST", "/dashboard/api-keys", { is_live }, "apiKeysSpinner");
+        await callAPI(
+          "POST",
+          "/dashboard/api-keys",
+          { is_live },
+          "apiKeysSpinner",
+        );
       }
 
       // ── GET /plans ────────────────────────────────────────────────────────────────
@@ -1759,7 +1863,12 @@
           alert("Please enter a Plan ID.");
           return;
         }
-        await callAPI("POST", "/dashboard/plans/activate", { plan_id }, "activatePlanSpinner");
+        await callAPI(
+          "POST",
+          "/dashboard/plans/activate",
+          { plan_id },
+          "activatePlanSpinner",
+        );
       }
 
       // ── POST /plans ───────────────────────────────────────────────────────────────
@@ -1771,7 +1880,12 @@
           alert("Please fill in all plan fields.");
           return;
         }
-        await callAPI("POST", "/dashboard/plans", { name, call_limit, price_cents }, "plansPostSpinner");
+        await callAPI(
+          "POST",
+          "/dashboard/plans",
+          { name, call_limit, price_cents },
+          "plansPostSpinner",
+        );
       }
 
       // ── /match ────────────────────────────────────────────────────────────────────
@@ -1877,7 +1991,11 @@
       async function startCamera() {
         try {
           cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: "user",
+            },
           });
           $("cameraFeed").srcObject = cameraStream;
           $("cameraOverlay").classList.add("hidden");
@@ -1916,7 +2034,10 @@
         const img = $("capturedSelfie");
         img.src = dataUrl;
         img.style.display = "block";
-        addLog(`Selfie captured ✓ (${canvas.width}x${canvas.height})`, "log-ok");
+        addLog(
+          `Selfie captured ✓ (${canvas.width}x${canvas.height})`,
+          "log-ok",
+        );
       }
 
       // Auto ping on load

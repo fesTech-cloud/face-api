@@ -59,12 +59,14 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(gin.Logger())
 	r.Use(requestid.New())
+	allowedOrigins := getEnv("ALLOWED_ORIGINS", "*")
+	corsOrigins := []string{allowedOrigins}
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:  []string{"*"},
+		AllowOrigins:  corsOrigins,
 		AllowMethods:  []string{"GET", "POST", "DELETE", "OPTIONS"},
 		AllowHeaders:  []string{"Origin", "Authorization", "Content-Type"},
 		ExposeHeaders: []string{"X-Request-Id"},
-		MaxAge:        12 * time.Hour,
+		MaxAge:        1 * time.Hour,
 	}))
 
 	// ── Routes ──────────────────────────────────────────────────────────────
@@ -96,21 +98,20 @@ func main() {
 
 	dashboardRoute := r.Group("/dashboard")
 	{
-		h := dasboard.NewDashboardHandler(db)
+		h := dasboard.NewDashboardHandler(db, rdb)
 
 		dashboardRoute.POST("/signup", h.CreateAccount)
 		dashboardRoute.POST("/login", h.Login)
 		dashboardRoute.GET("/plans", h.GetPlans)
-		dashboardRoute.POST("/plans", h.CreatePlan)
 
 		authenticated := dashboardRoute.Group("/")
 		authenticated.Use(auth.AuthenticatedUserMiddleware(db))
 		{
 			authenticated.POST("/api-keys", h.CreateAPIKey)
+			authenticated.GET("/api-keys", h.ListAPIKeys)
+			authenticated.DELETE("/api-keys/:id", h.DeleteAPIKey)
+			authenticated.POST("/plans", h.CreatePlan)
 			authenticated.POST("/plans/activate", h.ActivatePlan)
-
-			// authenticated.GET("/api-keys", h.ListAPIKeys)
-			// authenticated.DELETE("/api-keys/:id", h.DeleteAPIKey)
 		}
 	}
 

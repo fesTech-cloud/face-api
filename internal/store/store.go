@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"face-api/internal/cache"
-	"face-api/x/interfacex"
-	"face-api/x/security"
 	"fmt"
 	"math"
 	"time"
+
+	"face-api/internal/cache"
+	"face-api/x/interfacex"
+	"face-api/x/security"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -169,7 +170,6 @@ func (s *Store) GetAPIKey(ctx context.Context, token string) (*APIKeyRecord, err
 		`, security.HashKey(token)).
 		Scan(&rec).Error
 	if err != nil || rec.ID == (uuid.UUID{}) {
-		fmt.Println("Error", err)
 		return nil, nil
 	}
 
@@ -374,6 +374,54 @@ func (s *Store) ActivatePlan(ctx context.Context, userID uuid.UUID, planID uuid.
 	}
 
 	return s.GetUserById(ctx, userID.String())
+}
+
+// DeleteCollection removes a collection and all its face embeddings.
+// It verifies ownership by requiring both userID and collectionID to match.
+func (s *Store) DeleteCollection(ctx context.Context, userID uuid.UUID, collectionID uuid.UUID) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Verify ownership before deleting
+		var col Collection
+		if err := tx.Where("id = ? AND user_id = ?", collectionID, userID).First(&col).Error; err != nil {
+			return fmt.Errorf("collection not found or access denied")
+		}
+		if err := tx.Where("collection_id = ?", collectionID).Delete(&FaceEmbedding{}).Error; err != nil {
+			return fmt.Errorf("delete embeddings: %w", err)
+		}
+		if err := tx.Delete(&col).Error; err != nil {
+			return fmt.Errorf("delete collection: %w", err)
+		}
+		return nil
+	})
+}
+
+// ListAPIKeys returns all API keys for a user (hashes are not exposed).
+func (s *Store) ListAPIKeys(ctx context.Context, userID uuid.UUID) ([]APIKey, error) {
+	var keys []APIKey
+	err := s.db.WithContext(ctx).
+		Select("id, user_id, is_live, last_used_at, created_at").
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Find(&keys).Error
+	if err != nil {
+		return nil, fmt.Errorf("list api keys: %w", err)
+	}
+	return keys, nil
+}
+
+// DeleteAPIKey deactivates an API key, verifying it belongs to the user.
+func (s *Store) DeleteAPIKey(ctx context.Context, userID uuid.UUID, keyID uuid.UUID) error {
+	result := s.db.WithContext(ctx).
+		Model(&APIKey{}).
+		Where("id = ? AND user_id = ?", keyID, userID).
+		Update("is_live", false)
+	if result.Error != nil {
+		return fmt.Errorf("delete api key: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("api key not found or access denied")
+	}
+	return nil
 }
 
 // GetUserCollections returns all collections for a given user.

@@ -45,7 +45,7 @@ func (m *PasetoManager) GenerateToken(userID, email string, duration time.Durati
 	token.SetAudience("face-api-dashboard") // who it is for
 	token.SetIssuedAt(time.Now())
 	token.SetNotBefore(time.Now())
-	token.SetExpiration(time.Now().Add(24 * time.Hour))
+	token.SetExpiration(time.Now().Add(duration))
 
 	// Custom claims
 	token.SetString("user_id", userID)

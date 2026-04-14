@@ -1,11 +1,11 @@
 package api
 
 import (
-	"fmt"
 	"math"
 	"net/http"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -23,6 +23,10 @@ func matchesDir() string {
 	return abs
 }
 
+// maxBase64ImageSize is ~10 MB decoded (~13.3 MB base64 encoded).
+// This prevents memory exhaustion from oversized payloads.
+const maxBase64ImageSize = 14_000_000
+
 // Handler holds all dependencies for the API layer
 type Handler struct {
 	db     *store.Store
@@ -32,6 +36,11 @@ type Handler struct {
 
 func NewHandler(db *store.Store, c *cache.Cache, e *engine.FaceEngine) *Handler {
 	return &Handler{db: db, cache: c, engine: e}
+}
+
+// validateImageSize rejects base64 strings that exceed maxBase64ImageSize.
+func validateImageSize(b64 string) bool {
+	return len(b64) <= maxBase64ImageSize
 }
 
 // ── POST /v1/match ────────────────────────────────────────────────────────────
@@ -45,6 +54,10 @@ func (h *Handler) Match(c *gin.Context) {
 	var req MatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !validateImageSize(req.ImageA) || !validateImageSize(req.ImageB) {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image exceeds maximum allowed size (10 MB)"})
 		return
 	}
 
@@ -99,6 +112,10 @@ func (h *Handler) Verify(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !validateImageSize(req.Selfie) || !validateImageSize(req.IDPhoto) {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image exceeds maximum allowed size (10 MB)"})
+		return
+	}
 
 	embSelfie, _, err := h.engine.EmbedBase64(req.Selfie)
 	if err != nil {
@@ -108,7 +125,6 @@ func (h *Handler) Verify(c *gin.Context) {
 
 	embID, _, err := h.engine.EmbedBase64(req.IDPhoto)
 	if err != nil {
-		fmt.Printf("ID photo embedding error: %v\n", err)
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "id_photo: " + err.Error()})
 		return
 	}
@@ -132,6 +148,10 @@ func (h *Handler) Detect(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !validateImageSize(req.Image) {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image exceeds maximum allowed size (10 MB)"})
 		return
 	}
 
@@ -191,6 +211,16 @@ func (h *Handler) Enroll(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !validateImageSize(req.Image) {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image exceeds maximum allowed size (10 MB)"})
+		return
+	}
+
+	userID, err := uuid.Parse(c.GetString("user_id"))
+	if err != nil || userID == (uuid.UUID{}) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
+	}
 
 	emb, _, err := h.engine.EmbedBase64(req.Image)
 	if err != nil {
@@ -198,7 +228,6 @@ func (h *Handler) Enroll(c *gin.Context) {
 		return
 	}
 
-	userID, _ := uuid.Parse(c.GetString("user_id"))
 	col, err := h.db.GetOrCreateCollection(c.Request.Context(), userID, req.Collection)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve collection"})
@@ -221,6 +250,8 @@ func (h *Handler) Enroll(c *gin.Context) {
 
 // ── POST /v1/search ───────────────────────────────────────────────────────────
 
+const maxTopK = 100
+
 func (h *Handler) Search(c *gin.Context) {
 	var req struct {
 		Collection string  `json:"collection" binding:"required"`
@@ -232,12 +263,24 @@ func (h *Handler) Search(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if !validateImageSize(req.Image) {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image exceeds maximum allowed size (10 MB)"})
+		return
+	}
 
-	if req.TopK == 0 {
+	if req.TopK <= 0 {
 		req.TopK = 5
+	} else if req.TopK > maxTopK {
+		req.TopK = maxTopK
 	}
 	if req.Threshold == 0 {
 		req.Threshold = 0.6
+	}
+
+	userID, err := uuid.Parse(c.GetString("user_id"))
+	if err != nil || userID == (uuid.UUID{}) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
 	}
 
 	emb, _, err := h.engine.EmbedBase64(req.Image)
@@ -246,7 +289,6 @@ func (h *Handler) Search(c *gin.Context) {
 		return
 	}
 
-	userID, _ := uuid.Parse(c.GetString("user_id"))
 	col, err := h.db.GetOrCreateCollection(c.Request.Context(), userID, req.Collection)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve collection"})
@@ -269,21 +311,47 @@ func (h *Handler) Search(c *gin.Context) {
 // ── GET /v1/collections ───────────────────────────────────────────────────────
 
 func (h *Handler) ListCollections(c *gin.Context) {
-	// TODO: fetch from DB by api_key owner
+	userID, err := uuid.Parse(c.GetString("user_id"))
+	if err != nil || userID == (uuid.UUID{}) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
+	}
+
+	collections, err := h.db.GetUserCollections(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list collections"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"collections": []gin.H{},
-		"count":       0,
+		"collections": collections,
+		"count":       len(collections),
 	})
 }
 
 // ── DELETE /v1/collections/:id ────────────────────────────────────────────────
 
 func (h *Handler) DeleteCollection(c *gin.Context) {
-	id := c.Param("id")
-	// TODO: delete collection + embeddings from DB
+	collectionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection id"})
+		return
+	}
+
+	userID, err := uuid.Parse(c.GetString("user_id"))
+	if err != nil || userID == (uuid.UUID{}) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
+		return
+	}
+
+	if err := h.db.DeleteCollection(c.Request.Context(), userID, collectionID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete collection"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"deleted":       true,
-		"collection_id": id,
+		"collection_id": collectionID,
 	})
 }
 
@@ -291,13 +359,22 @@ func (h *Handler) DeleteCollection(c *gin.Context) {
 
 func (h *Handler) Usage(c *gin.Context) {
 	apiKey := c.GetString("api_key")
-	used, _ := h.cache.GetMonthlyUsage(c.Request.Context(), apiKey)
+	callLimit := c.GetInt("call_limit")
+
+	used, err := h.cache.GetMonthlyUsage(c.Request.Context(), apiKey)
+	if err != nil {
+		used = 0
+	}
+
+	now := time.Now().UTC()
+	// First day of next month
+	resetDate := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
 
 	c.JSON(http.StatusOK, gin.H{
 		"used":       used,
-		"limit":      5000,
-		"period":     "2026-03",
-		"reset_date": "2026-04-01",
+		"limit":      callLimit,
+		"period":     now.Format("2006-01"),
+		"reset_date": resetDate.Format("2006-01-02"),
 	})
 }
 
