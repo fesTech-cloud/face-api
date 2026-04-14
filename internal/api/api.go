@@ -13,6 +13,7 @@ import (
 	"face-api/internal/cache"
 	"face-api/internal/engine"
 	"face-api/internal/store"
+	"face-api/internal/webhook"
 )
 
 // matchesDir returns an absolute path to logs/matches/ relative to this source file.
@@ -29,13 +30,14 @@ const maxBase64ImageSize = 14_000_000
 
 // Handler holds all dependencies for the API layer
 type Handler struct {
-	db     *store.Store
-	cache  *cache.Cache
-	engine *engine.FaceEngine
+	db         *store.Store
+	cache      *cache.Cache
+	engine     *engine.FaceEngine
+	dispatcher *webhook.Dispatcher
 }
 
 func NewHandler(db *store.Store, c *cache.Cache, e *engine.FaceEngine) *Handler {
-	return &Handler{db: db, cache: c, engine: e}
+	return &Handler{db: db, cache: c, engine: e, dispatcher: webhook.NewDispatcher(db)}
 }
 
 // validateImageSize rejects base64 strings that exceed maxBase64ImageSize.
@@ -90,14 +92,20 @@ func (h *Handler) Match(c *gin.Context) {
 	dist := euclidean(embA, embB)
 	conf := math.Max(0, 1.0-(dist/1.2))
 
-	c.JSON(http.StatusOK, gin.H{
+	result := gin.H{
 		"match":      dist < 0.6,
 		"distance":   round(dist, 4),
 		"confidence": round(conf, 4),
 		"face_a":     gin.H{"detected": true, "bbox": bboxA},
 		"face_b":     gin.H{"detected": true, "bbox": bboxB},
-		// "call_id":    callID,
-	})
+	}
+
+	// Fire webhook event if the caller is authenticated
+	// if userID, err := uuid.Parse(c.GetString("user_id")); err == nil && userID != (uuid.UUID{}) {
+	// 	h.dispatcher.Fire(userID, "match", result)
+	// }
+
+	c.JSON(http.StatusOK, result)
 }
 
 // ── POST /v1/verify ───────────────────────────────────────────────────────────
@@ -300,12 +308,17 @@ func (h *Handler) Search(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "search failed", "detail": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+
+	searchResult := gin.H{
 		"collection": req.Collection,
 		"threshold":  req.Threshold,
 		"results":    results,
 		"count":      len(results),
-	})
+	}
+
+	h.dispatcher.Fire(userID, "search", searchResult)
+
+	c.JSON(http.StatusOK, searchResult)
 }
 
 // ── GET /v1/collections ───────────────────────────────────────────────────────

@@ -112,6 +112,9 @@ func main() {
 			authenticated.DELETE("/api-keys/:id", h.DeleteAPIKey)
 			authenticated.POST("/plans", h.CreatePlan)
 			authenticated.POST("/plans/activate", h.ActivatePlan)
+			authenticated.POST("/webhooks", h.CreateWebhook)
+			authenticated.GET("/webhooks", h.ListWebhooks)
+			authenticated.DELETE("/webhooks/:id", h.DeleteWebhook)
 		}
 	}
 

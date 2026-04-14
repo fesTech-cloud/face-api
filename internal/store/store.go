@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"face-api/internal/cache"
@@ -21,6 +24,20 @@ import (
 )
 
 // ── Models ────────────────────────────────────────────────────────────────────
+
+// Webhook stores a registered endpoint that receives signed event payloads.
+// The Secret is stored in plaintext because we need it to sign outgoing requests.
+// It is returned to the user only once at creation time.
+type Webhook struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null;index:idx_webhooks_user_id"`
+	User      User      `gorm:"foreignKey:UserID"`
+	URL       string    `gorm:"not null"`
+	Secret    string    `gorm:"not null"`
+	Events    string    `gorm:"not null;default:'match,search'"` // comma-separated event names
+	IsActive  bool      `gorm:"not null;default:true"`
+	CreatedAt time.Time
+}
 
 type Plan struct {
 	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"`
@@ -142,6 +159,7 @@ func New(dbURL string, c *cache.Cache) (*Store, error) {
 		&UsageLog{},
 		&Collection{},
 		&FaceEmbedding{},
+		&Webhook{},
 	); err != nil {
 		return nil, fmt.Errorf("automigrate: %w", err)
 	}
@@ -434,6 +452,91 @@ func (s *Store) GetUserCollections(ctx context.Context, userID uuid.UUID) ([]Col
 		return nil, fmt.Errorf("get user collections: %w", err)
 	}
 	return collections, nil
+}
+
+// ── Webhook methods ───────────────────────────────────────────────────────────
+
+// generateWebhookSecret returns a cryptographically random 32-byte hex string.
+func generateWebhookSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// CreateWebhook registers a new webhook for the user and returns the record
+// along with the plaintext secret (shown only once).
+func (s *Store) CreateWebhook(ctx context.Context, userID uuid.UUID, url string, events []string) (*Webhook, string, error) {
+	secret, err := generateWebhookSecret()
+	if err != nil {
+		return nil, "", fmt.Errorf("generate webhook secret: %w", err)
+	}
+
+	wh := Webhook{
+		UserID:   userID,
+		URL:      url,
+		Secret:   secret,
+		Events:   strings.Join(events, ","),
+		IsActive: true,
+	}
+
+	if err := s.db.WithContext(ctx).Create(&wh).Error; err != nil {
+		return nil, "", fmt.Errorf("db create webhook: %w", err)
+	}
+
+	return &wh, secret, nil
+}
+
+// ListWebhooks returns all active webhooks for a user (secret omitted).
+func (s *Store) ListWebhooks(ctx context.Context, userID uuid.UUID) ([]Webhook, error) {
+	var hooks []Webhook
+	err := s.db.WithContext(ctx).
+		Select("id, user_id, url, events, is_active, created_at").
+		Where("user_id = ? AND is_active = true", userID).
+		Order("created_at DESC").
+		Find(&hooks).Error
+	if err != nil {
+		return nil, fmt.Errorf("list webhooks: %w", err)
+	}
+	return hooks, nil
+}
+
+// DeleteWebhook deactivates a webhook, verifying it belongs to the user.
+func (s *Store) DeleteWebhook(ctx context.Context, userID uuid.UUID, webhookID uuid.UUID) error {
+	result := s.db.WithContext(ctx).
+		Model(&Webhook{}).
+		Where("id = ? AND user_id = ?", webhookID, userID).
+		Update("is_active", false)
+	if result.Error != nil {
+		return fmt.Errorf("delete webhook: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("webhook not found or access denied")
+	}
+	return nil
+}
+
+// GetActiveWebhooksForEvent returns active webhooks for a user subscribed to the given event.
+func (s *Store) GetActiveWebhooksForEvent(ctx context.Context, userID uuid.UUID, event string) ([]Webhook, error) {
+	var hooks []Webhook
+	err := s.db.WithContext(ctx).
+		Where("user_id = ? AND is_active = true", userID).
+		Find(&hooks).Error
+	if err != nil {
+		return nil, fmt.Errorf("get webhooks: %w", err)
+	}
+
+	var matched []Webhook
+	for _, wh := range hooks {
+		for _, e := range strings.Split(wh.Events, ",") {
+			if strings.TrimSpace(e) == event {
+				matched = append(matched, wh)
+				break
+			}
+		}
+	}
+	return matched, nil
 }
 
 // SearchFacesAcrossCollections searches for matching faces across all collections for a user.

@@ -208,3 +208,69 @@ func (h *DashboardHandler) ActivatePlan(c *gin.Context) {
 		},
 	})
 }
+
+// ── POST /dashboard/webhooks ──────────────────────────────────────────────────
+
+func (h *DashboardHandler) CreateWebhook(c *gin.Context) {
+	var req struct {
+		URL    string   `json:"url"    binding:"required,url"`
+		Events []string `json:"events" binding:"required,min=1"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user := c.MustGet("user").(*store.User)
+
+	wh, secret, err := h.db.CreateWebhook(c.Request.Context(), user.ID, req.URL, req.Events)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create webhook"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"webhook": gin.H{
+			"id":         wh.ID,
+			"url":        wh.URL,
+			"events":     req.Events,
+			"is_active":  wh.IsActive,
+			"created_at": wh.CreatedAt,
+		},
+		// Secret is shown only once — store it safely
+		"secret": secret,
+	})
+}
+
+// ── GET /dashboard/webhooks ───────────────────────────────────────────────────
+
+func (h *DashboardHandler) ListWebhooks(c *gin.Context) {
+	user := c.MustGet("user").(*store.User)
+
+	hooks, err := h.db.ListWebhooks(c.Request.Context(), user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list webhooks"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"webhooks": hooks, "count": len(hooks)})
+}
+
+// ── DELETE /dashboard/webhooks/:id ───────────────────────────────────────────
+
+func (h *DashboardHandler) DeleteWebhook(c *gin.Context) {
+	webhookID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid webhook id"})
+		return
+	}
+
+	user := c.MustGet("user").(*store.User)
+
+	if err := h.db.DeleteWebhook(c.Request.Context(), user.ID, webhookID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "webhook_id": webhookID})
+}
