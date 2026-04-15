@@ -15,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"face-api/internal/api"
+	"face-api/internal/api/admin"
 	"face-api/internal/api/dasboard"
 	"face-api/internal/auth"
 	"face-api/internal/cache"
@@ -63,7 +64,7 @@ func main() {
 	corsOrigins := []string{allowedOrigins}
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:  corsOrigins,
-		AllowMethods:  []string{"GET", "POST", "DELETE", "OPTIONS"},
+		AllowMethods:  []string{"GET", "POST", "DELETE", "PATCH", "OPTIONS"},
 		AllowHeaders:  []string{"Origin", "Authorization", "Content-Type"},
 		ExposeHeaders: []string{"X-Request-Id"},
 		MaxAge:        1 * time.Hour,
@@ -94,6 +95,22 @@ func main() {
 		face.GET("/collections", h.ListCollections)
 		face.DELETE("/collections/:id", h.DeleteCollection)
 		face.GET("/usage", h.Usage)
+	}
+
+	adminRoute := r.Group("/admin")
+	adminRoute.Use(auth.AdminMiddleware(db))
+	{
+		h := admin.NewHandler(db, rdb)
+
+		adminRoute.GET("/stats", h.GetStats)
+		adminRoute.GET("/users", h.ListUsers)
+		adminRoute.GET("/users/:id", h.GetUser)
+		adminRoute.GET("/users/:id/stats", h.GetUserStats)
+		adminRoute.PATCH("/users/:id/plan", h.AssignPlan)
+		adminRoute.DELETE("/users/:id", h.DeleteUser)
+		adminRoute.GET("/api-keys", h.ListAPIKeys)
+		adminRoute.DELETE("/api-keys/:id", h.RevokeAPIKey)
+		adminRoute.GET("/usage-logs", h.ListUsageLogs)
 	}
 
 	dashboardRoute := r.Group("/dashboard")

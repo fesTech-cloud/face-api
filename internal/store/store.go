@@ -29,63 +29,74 @@ import (
 // The Secret is stored in plaintext because we need it to sign outgoing requests.
 // It is returned to the user only once at creation time.
 type Webhook struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"`
-	UserID    uuid.UUID `gorm:"type:uuid;not null;index:idx_webhooks_user_id"`
-	User      User      `gorm:"foreignKey:UserID"`
-	URL       string    `gorm:"not null"`
-	Secret    string    `gorm:"not null"`
-	Events    string    `gorm:"not null;default:'match,search'"` // comma-separated event names
-	IsActive  bool      `gorm:"not null;default:true"`
-	CreatedAt time.Time
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"  json:"id"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null;index:idx_webhooks_user_id"    json:"user_id"`
+	User      User      `gorm:"foreignKey:UserID"                                json:"-"`
+	URL       string    `gorm:"not null"                                         json:"url"`
+	Secret    string    `gorm:"not null"                                         json:"-"`
+	Events    string    `gorm:"not null;default:'match,search'"                  json:"events"`
+	IsActive  bool      `gorm:"not null;default:true"                            json:"is_active"`
+	CreatedAt time.Time `                                                        json:"created_at"`
 }
 
 type Plan struct {
-	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"`
-	Name          string    `gorm:"uniqueIndex;not null"`
-	CallLimit     int       `gorm:"not null;default:500"`
-	PriceUSDCents int       `gorm:"not null;default:0"`
-	StripePriceID *string
-	CreatedAt     time.Time
+	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	Name          string    `gorm:"uniqueIndex;not null"                            json:"name"`
+	CallLimit     int       `gorm:"not null;default:500"                            json:"call_limit"`
+	PriceUSDCents int       `gorm:"not null;default:0"                              json:"price_usd_cents"`
+	StripePriceID *string   `                                                       json:"stripe_price_id,omitempty"`
+	CreatedAt     time.Time `                                                       json:"created_at"`
 }
 
 type User struct {
-	ID               uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"`
-	Email            string    `gorm:"uniqueIndex;not null"`
-	PasswordHash     string    `gorm:"not null"`
-	PlanID           uuid.UUID `gorm:"type:uuid;not null"`
-	Plan             Plan      `gorm:"foreignKey:PlanID"`
-	StripeCustomerID *string
-	BrandName        string `gorm:"not null"`
-	CreatedAt        time.Time
+	ID               uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	Email            string    `gorm:"uniqueIndex;not null"                            json:"email"`
+	PasswordHash     string    `gorm:"not null"                                        json:"-"`
+	PlanID           uuid.UUID `gorm:"type:uuid;not null"                              json:"plan_id"`
+	Plan             Plan      `gorm:"foreignKey:PlanID"                               json:"plan"`
+	StripeCustomerID *string   `                                                       json:"stripe_customer_id,omitempty"`
+	BrandName        string    `gorm:"not null"                                        json:"brand_name"`
+	IsAdmin          bool      `gorm:"not null;default:false"                          json:"is_admin"`
+	CreatedAt        time.Time `                                                       json:"created_at"`
+}
+
+// AdminStats holds platform-wide aggregate counters.
+type AdminStats struct {
+	TotalUsers       int64 `json:"total_users"`
+	TotalPlans       int64 `json:"total_plans"`
+	TotalAPIKeys     int64 `json:"total_api_keys"`
+	TotalAPICalls    int64 `json:"total_api_calls"`
+	TotalCollections int64 `json:"total_collections"`
+	CallsToday       int64 `json:"calls_today"`
 }
 
 type APIKey struct {
-	ID         uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"`
-	UserID     uuid.UUID `gorm:"type:uuid;not null;index:idx_api_keys_user_id"`
-	User       User      `gorm:"foreignKey:UserID"`
-	KeyHash    string    `gorm:"uniqueIndex:idx_api_keys_key_hash;not null"`
-	IsLive     bool      `gorm:"not null;default:true"`
-	LastUsedAt *time.Time
-	CreatedAt  time.Time
+	ID         uuid.UUID  `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"  json:"id"`
+	UserID     uuid.UUID  `gorm:"type:uuid;not null;index:idx_api_keys_user_id"    json:"user_id"`
+	User       User       `gorm:"foreignKey:UserID"                                json:"-"`
+	KeyHash    string     `gorm:"uniqueIndex:idx_api_keys_key_hash;not null"       json:"-"`
+	IsLive     bool       `gorm:"not null;default:true"                            json:"is_live"`
+	LastUsedAt *time.Time `                                                        json:"last_used_at,omitempty"`
+	CreatedAt  time.Time  `                                                        json:"created_at"`
 }
 
 type UsageLog struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"`
-	APIKeyID  uuid.UUID `gorm:"type:uuid;not null;index:idx_usage_logs_api_key_id"`
-	APIKey    APIKey    `gorm:"foreignKey:APIKeyID"`
-	Endpoint  string    `gorm:"not null"`
-	CallID    string    `gorm:"not null"`
-	ElapsedMs *int
-	CreatedAt time.Time `gorm:"index:idx_usage_logs_created_at"`
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"          json:"id"`
+	APIKeyID  uuid.UUID `gorm:"type:uuid;not null;index:idx_usage_logs_api_key_id"       json:"api_key_id"`
+	APIKey    APIKey    `gorm:"foreignKey:APIKeyID"                                      json:"-"`
+	Endpoint  string    `gorm:"not null"                                                 json:"endpoint"`
+	CallID    string    `gorm:"not null"                                                 json:"call_id"`
+	ElapsedMs *int      `                                                                json:"elapsed_ms,omitempty"`
+	CreatedAt time.Time `gorm:"index:idx_usage_logs_created_at"                          json:"created_at"`
 }
 
 type Collection struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"`
-	UserID    uuid.UUID `gorm:"type:uuid;not null;index:idx_collections_user_id"`
-	User      User      `gorm:"foreignKey:UserID"`
-	Name      string    `gorm:"not null;uniqueIndex:idx_collections_user_name"`
-	FaceCount int       `gorm:"not null;default:0"`
-	CreatedAt time.Time
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()"           json:"id"`
+	UserID    uuid.UUID `gorm:"type:uuid;not null;index:idx_collections_user_id"          json:"user_id"`
+	User      User      `gorm:"foreignKey:UserID"                                         json:"-"`
+	Name      string    `gorm:"not null;uniqueIndex:idx_collections_user_name"            json:"name"`
+	FaceCount int       `gorm:"not null;default:0"                                        json:"face_count"`
+	CreatedAt time.Time `                                                                 json:"created_at"`
 }
 
 func (Collection) TableName() string { return "collections" }

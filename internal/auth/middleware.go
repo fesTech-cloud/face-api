@@ -55,6 +55,49 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 	}
 }
 
+// AdminMiddleware verifies the PASETO token and requires the user to have
+// IsAdmin = true. It sets the same "user" context key as AuthenticatedUserMiddleware.
+func AdminMiddleware(db *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "missing or invalid Authorization header",
+			})
+			return
+		}
+
+		token := strings.TrimPrefix(header, "Bearer ")
+
+		securityManager := security.NewPasetoManager()
+		claims, err := securityManager.VerifyToken(token)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid or expired token",
+			})
+			return
+		}
+
+		user, err := db.GetUserById(c.Request.Context(), claims.UserID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "user not found",
+			})
+			return
+		}
+
+		if !user.IsAdmin {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "admin access required",
+			})
+			return
+		}
+
+		c.Set("user", user)
+		c.Next()
+	}
+}
+
 func AuthenticatedUserMiddleware(db *store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
