@@ -132,7 +132,14 @@ func main() {
 			authenticated.POST("/webhooks", h.CreateWebhook)
 			authenticated.GET("/webhooks", h.ListWebhooks)
 			authenticated.DELETE("/webhooks/:id", h.DeleteWebhook)
+
+			// Paystack payment
+			authenticated.POST("/payment/initialize", h.InitializePayment)
+			authenticated.GET("/payment/verify/:reference", h.VerifyPayment)
 		}
+
+		// Public webhook endpoint — Paystack calls this, no auth needed.
+		dashboardRoute.POST("/payment/webhook", h.PaystackWebhook)
 	}
 
 	// ── Graceful shutdown ───────────────────────────────────────────────────

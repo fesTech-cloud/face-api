@@ -28,9 +28,9 @@ type UserResponse struct {
 }
 
 type CreatePlanRequest struct {
-	Name       string `json:"name" binding:"required"`
-	CallLimit  int    `json:"call_limit" binding:"required"`
-	PriceCents int    `json:"price_cents" binding:"required"`
+	Name        string `json:"name" binding:"required"`
+	CallLimit   int    `json:"call_limit" binding:"required"`
+	PriceNaira  int    `json:"price_naira" binding:"required"`
 }
 
 type ActivatePlanRequest struct {

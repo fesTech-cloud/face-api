@@ -40,24 +40,38 @@ type Webhook struct {
 }
 
 type Plan struct {
-	ID            uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
-	Name          string    `gorm:"uniqueIndex;not null"                            json:"name"`
-	CallLimit     int       `gorm:"not null;default:500"                            json:"call_limit"`
-	PriceUSDCents int       `gorm:"not null;default:0"                              json:"price_usd_cents"`
-	StripePriceID *string   `                                                       json:"stripe_price_id,omitempty"`
-	CreatedAt     time.Time `                                                       json:"created_at"`
+	ID               uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	Name             string    `gorm:"uniqueIndex;not null"                            json:"name"`
+	CallLimit        int       `gorm:"not null;default:500"                            json:"call_limit"`
+	PriceNaira        int       `gorm:"not null;default:0"                              json:"price_naira"`
+	PaystackPlanCode *string   `                                                       json:"paystack_plan_code,omitempty"`
+	CreatedAt        time.Time `                                                       json:"created_at"`
 }
 
 type User struct {
-	ID               uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
-	Email            string    `gorm:"uniqueIndex;not null"                            json:"email"`
-	PasswordHash     string    `gorm:"not null"                                        json:"-"`
-	PlanID           uuid.UUID `gorm:"type:uuid;not null"                              json:"plan_id"`
-	Plan             Plan      `gorm:"foreignKey:PlanID"                               json:"plan"`
-	StripeCustomerID *string   `                                                       json:"stripe_customer_id,omitempty"`
-	BrandName        string    `gorm:"not null"                                        json:"brand_name"`
-	IsAdmin          bool      `gorm:"not null;default:false"                          json:"is_admin"`
-	CreatedAt        time.Time `                                                       json:"created_at"`
+	ID                   uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	Email                string    `gorm:"uniqueIndex;not null"                            json:"email"`
+	PasswordHash         string    `gorm:"not null"                                        json:"-"`
+	PlanID               uuid.UUID `gorm:"type:uuid;not null"                              json:"plan_id"`
+	Plan                 Plan      `gorm:"foreignKey:PlanID"                               json:"plan"`
+	PaystackCustomerCode *string   `                                                       json:"paystack_customer_code,omitempty"`
+	BrandName            string    `gorm:"not null"                                        json:"brand_name"`
+	IsAdmin              bool      `gorm:"not null;default:false"                          json:"is_admin"`
+	CreatedAt            time.Time `                                                       json:"created_at"`
+}
+
+// Subscription tracks a user's Paystack payment for a plan.
+type Subscription struct {
+	ID                uuid.UUID  `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	UserID            uuid.UUID  `gorm:"type:uuid;not null;index"                        json:"user_id"`
+	User              User       `gorm:"foreignKey:UserID"                               json:"-"`
+	PlanID            uuid.UUID  `gorm:"type:uuid;not null"                              json:"plan_id"`
+	PaystackReference string     `gorm:"uniqueIndex;not null"                            json:"paystack_reference"`
+	Status            string     `gorm:"not null;default:'pending'"                      json:"status"` // pending | active | failed
+	AmountPaid        int        `gorm:"not null;default:0"                              json:"amount_paid"`
+	CreatedAt         time.Time  `                                                       json:"created_at"`
+	UpdatedAt         time.Time  `                                                       json:"updated_at"`
+	ExpiresAt         *time.Time `                                                       json:"expires_at,omitempty"`
 }
 
 // AdminStats holds platform-wide aggregate counters.
@@ -171,6 +185,7 @@ func New(dbURL string, c *cache.Cache) (*Store, error) {
 		&Collection{},
 		&FaceEmbedding{},
 		&Webhook{},
+		&Subscription{},
 	); err != nil {
 		return nil, fmt.Errorf("automigrate: %w", err)
 	}
@@ -383,7 +398,7 @@ func (s *Store) CreatePlan(ctx context.Context, req interfacex.CreatePlanRequest
 	plan := Plan{
 		Name:          req.Name,
 		CallLimit:     req.CallLimit,
-		PriceUSDCents: req.PriceCents,
+		PriceNaira: req.PriceNaira,
 	}
 
 	if err := s.db.WithContext(ctx).Create(&plan).Error; err != nil {
@@ -589,4 +604,66 @@ func (s *Store) SearchFacesAcrossCollections(ctx context.Context, userID uuid.UU
 	}
 
 	return results, nil
+}
+
+// ── Subscription / Payment methods ────────────────────────────────────────────
+
+// CreateSubscription inserts a new pending subscription record.
+func (s *Store) CreateSubscription(ctx context.Context, userID, planID uuid.UUID, reference string, amount int) (*Subscription, error) {
+	sub := Subscription{
+		UserID:            userID,
+		PlanID:            planID,
+		PaystackReference: reference,
+		Status:            "pending",
+		AmountPaid:        amount,
+	}
+	if err := s.db.WithContext(ctx).Create(&sub).Error; err != nil {
+		return nil, fmt.Errorf("create subscription: %w", err)
+	}
+	return &sub, nil
+}
+
+// ActivateSubscription marks a subscription as active and switches the user's plan.
+// Runs in a transaction so both updates succeed or neither does.
+func (s *Store) ActivateSubscription(ctx context.Context, reference string, customerCode string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var sub Subscription
+		if err := tx.Where("paystack_reference = ?", reference).First(&sub).Error; err != nil {
+			return fmt.Errorf("subscription not found: %w", err)
+		}
+
+		if err := tx.Model(&sub).Updates(map[string]any{
+			"status":     "active",
+			"updated_at": time.Now(),
+		}).Error; err != nil {
+			return fmt.Errorf("update subscription status: %w", err)
+		}
+
+		updates := map[string]any{"plan_id": sub.PlanID}
+		if customerCode != "" {
+			updates["paystack_customer_code"] = customerCode
+		}
+		if err := tx.Model(&User{}).Where("id = ?", sub.UserID).Updates(updates).Error; err != nil {
+			return fmt.Errorf("update user plan: %w", err)
+		}
+
+		return nil
+	})
+}
+
+// FailSubscription marks a subscription as failed.
+func (s *Store) FailSubscription(ctx context.Context, reference string) error {
+	return s.db.WithContext(ctx).
+		Model(&Subscription{}).
+		Where("paystack_reference = ?", reference).
+		Updates(map[string]any{"status": "failed", "updated_at": time.Now()}).Error
+}
+
+// GetSubscriptionByReference looks up a subscription by its Paystack reference.
+func (s *Store) GetSubscriptionByReference(ctx context.Context, reference string) (*Subscription, error) {
+	var sub Subscription
+	if err := s.db.WithContext(ctx).Where("paystack_reference = ?", reference).First(&sub).Error; err != nil {
+		return nil, fmt.Errorf("subscription not found: %w", err)
+	}
+	return &sub, nil
 }

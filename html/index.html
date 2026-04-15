@@ -1072,7 +1072,7 @@
             <label>Price (cents)</label>
             <input
               type="number"
-              id="planPriceCents"
+              id="planPriceNaira"
               placeholder="e.g. 2900"
               min="0"
             />
@@ -1875,15 +1875,15 @@
       async function runCreatePlan() {
         const name = $("planName").value.trim();
         const call_limit = parseInt($("planCallLimit").value);
-        const price_cents = parseInt($("planPriceCents").value);
-        if (!name || !call_limit || isNaN(price_cents)) {
+        const price_naira = parseInt($("planPriceNaira").value);
+        if (!name || !call_limit || isNaN(price_naira)) {
           alert("Please fill in all plan fields.");
           return;
         }
         await callAPI(
           "POST",
           "/dashboard/plans",
-          { name, call_limit, price_cents },
+          { name, call_limit, price_naira },
           "plansPostSpinner",
         );
       }

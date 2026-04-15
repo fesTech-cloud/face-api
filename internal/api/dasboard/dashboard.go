@@ -66,6 +66,15 @@ func (h *DashboardHandler) CreateAPIKey(c *gin.Context) {
 		return
 	}
 
+	// Require a paid plan before issuing any API key.
+	plan, err := h.db.GetPlanByID(c.Request.Context(), user.PlanID)
+	if err != nil || plan.PriceNaira == 0 {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "a paid subscription is required to create API keys",
+		})
+		return
+	}
+
 	req.UserID = user.ID
 	keyRecord, key, err := h.db.CreateAPIKey(c.Request.Context(), req)
 	if err != nil {
