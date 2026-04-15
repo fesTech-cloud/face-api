@@ -215,6 +215,107 @@ redis-flush: ## Flush all Redis keys (DEV ONLY)
 # Setup
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Fly.io
+# Prerequisites: brew install flyctl  OR  curl -L https://fly.io/install.sh | sh
+# ─────────────────────────────────────────────────────────────────────────────
+
+FLY_APP      := face-api
+FLY_DB_APP   := face-api-db
+FLY_REGION   := lhr
+
+.PHONY: fly-auth
+fly-auth: ## Authenticate with Fly.io
+	@fly auth login
+
+.PHONY: fly-setup
+fly-setup: ## First-time Fly.io setup: create app and Postgres (Redis via Upstash.com)
+	@echo "==> Creating API app..."
+	@fly apps create $(FLY_APP) || true
+
+	@echo ""
+	@echo "==> Creating Postgres app (pgvector image)..."
+	@fly apps create $(FLY_DB_APP) || true
+	@fly volumes create pg_data \
+		--app $(FLY_DB_APP) \
+		--size 1 \
+		--region $(FLY_REGION) || true
+
+	@echo ""
+	@echo "==> Redis: sign up free at https://upstash.com"
+	@echo "   Create a Redis database, copy the 'Redis URL', then run:"
+	@echo "   make fly-secrets"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. Get Redis URL from https://upstash.com (free, no card needed)"
+	@echo "  2. Set secrets:  make fly-secrets"
+	@echo "  3. Deploy DB:    make fly-deploy-db"
+	@echo "  4. Deploy API:   make fly-deploy"
+
+.PHONY: fly-secrets
+fly-secrets: ## Set all required Fly.io secrets (prompts interactively)
+	@echo "==> Setting API secrets for $(FLY_APP)..."
+	@echo "Paste your PASETO_SECRET (64 hex chars) and press Enter:"; \
+		read PASETO; \
+		fly secrets set PASETO_SECRET="$$PASETO" --app $(FLY_APP)
+	@echo "Paste your DB password and press Enter:"; \
+		read DBPASS; \
+		fly secrets set \
+			DB_URL="postgres://faceapi:$$DBPASS@$(FLY_DB_APP).internal:5432/faceapi?sslmode=disable" \
+			--app $(FLY_APP); \
+		fly secrets set POSTGRES_PASSWORD="$$DBPASS" --app $(FLY_DB_APP)
+	@echo "Paste your Redis URL (from 'fly redis status') and press Enter:"; \
+		read REDIS; \
+		fly secrets set REDIS_URL="$$REDIS" --app $(FLY_APP)
+	@echo "Secrets set."
+
+.PHONY: fly-deploy-db
+fly-deploy-db: ## Deploy the pgvector Postgres machine
+	@echo "==> Deploying Postgres + pgvector..."
+	@fly deploy --config fly.postgres.toml --app $(FLY_DB_APP)
+
+.PHONY: fly-deploy
+fly-deploy: ## Build and deploy the API to Fly.io
+	@echo "==> Deploying $(FLY_APP)..."
+	@fly deploy --config fly.toml --app $(FLY_APP)
+
+.PHONY: fly-logs
+fly-logs: ## Tail live logs from the API
+	@fly logs --app $(FLY_APP)
+
+.PHONY: fly-logs-db
+fly-logs-db: ## Tail live logs from the Postgres machine
+	@fly logs --app $(FLY_DB_APP)
+
+.PHONY: fly-status
+fly-status: ## Show status of the API and DB apps
+	@echo "=== API ==="
+	@fly status --app $(FLY_APP)
+	@echo ""
+	@echo "=== Postgres ==="
+	@fly status --app $(FLY_DB_APP)
+
+.PHONY: fly-ssh
+fly-ssh: ## SSH into the running API machine
+	@fly ssh console --app $(FLY_APP)
+
+.PHONY: fly-db-shell
+fly-db-shell: ## Open a psql shell on the Postgres machine via Fly proxy
+	@fly proxy 15432:5432 --app $(FLY_DB_APP) & \
+		sleep 2 && \
+		psql "postgres://faceapi@localhost:15432/faceapi" ; \
+		kill %1
+
+.PHONY: fly-scale
+fly-scale: ## Scale API to 2 machines (usage: make fly-scale COUNT=2)
+	@fly scale count ${COUNT:-2} --app $(FLY_APP)
+
+.PHONY: fly-secrets-list
+fly-secrets-list: ## List secret names (values are hidden)
+	@fly secrets list --app $(FLY_APP)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Setup
 .PHONY: setup
 setup: ## First-time setup: copy .env, create dirs, download models
 	@[ -f .env ] || (cp .env.example .env && echo "Created .env from .env.example")

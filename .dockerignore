@@ -1,0 +1,27 @@
+# ── Secrets — never bake into image ──────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Local model files (Dockerfile re-downloads them) ─────────────────────────
+models/*.dat
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+bin/
+tmp/
+coverage/
+*.log
+logs/
+
+# ── Dev tooling ───────────────────────────────────────────────────────────────
+.air.toml
+.git/
+.gitignore
+
+# ── Test & docs ───────────────────────────────────────────────────────────────
+*_test.go
+*.md
+
+# ── OS noise ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

@@ -52,12 +52,14 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /app/bin/server ./server
 
-# Download dlib face recognition model files
+# Download all three dlib face recognition model files
 RUN mkdir -p ./models && \
     curl -fsSL https://github.com/davisking/dlib-models/raw/master/dlib_face_recognition_resnet_model_v1.dat.bz2 \
         | bunzip2 > ./models/dlib_face_recognition_resnet_model_v1.dat && \
     curl -fsSL https://github.com/davisking/dlib-models/raw/master/shape_predictor_5_face_landmarks.dat.bz2 \
         | bunzip2 > ./models/shape_predictor_5_face_landmarks.dat && \
+    curl -fsSL http://dlib.net/files/mmod_human_face_detector.dat.bz2 \
+        | bunzip2 > ./models/mmod_human_face_detector.dat && \
     chown -R appuser:appuser ./models
 
 # Switch to non-root

@@ -1,0 +1,53 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Fly.io configuration — PostgreSQL 16 + pgvector
+#
+# This deploys a dedicated Fly Machine running pgvector/pgvector:pg16.
+# Fly's managed "fly postgres create" does NOT include pgvector, so we run
+# our own Postgres container instead.
+#
+# Deploy steps (run once):
+#   fly apps create face-api-db
+#   fly volumes create pg_data --app face-api-db --size 10 --region lhr
+#   fly secrets set POSTGRES_PASSWORD=<strong-password> --app face-api-db
+#   fly deploy --config fly.postgres.toml --app face-api-db
+# ─────────────────────────────────────────────────────────────────────────────
+
+app            = "face-api-db"
+primary_region = "lhr"   # must match primary_region in fly.toml
+
+[build]
+  image = "pgvector/pgvector:pg16"
+
+# ── Non-secret env (password is a secret) ────────────────────────────────────
+[env]
+  POSTGRES_DB   = "faceapi"
+  POSTGRES_USER = "faceapi"
+  PGDATA        = "/var/lib/postgresql/data/pgdata"
+
+# ── Persistent volume for database files ─────────────────────────────────────
+[[mounts]]
+  source      = "pg_data"
+  destination = "/var/lib/postgresql/data"
+
+# ── Machine size ──────────────────────────────────────────────────────────────
+[[vm]]
+  cpu_kind  = "shared"
+  cpus      = 1
+  memory_mb = 512
+
+# ── Internal TCP service (NOT exposed to the public internet) ─────────────────
+# The API connects via Fly private network: face-api-db.internal:5432
+[[services]]
+  internal_port = 5432
+  protocol      = "tcp"
+  auto_stop_machines  = false   # Postgres must always be running
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 5432
+
+  [[services.tcp_checks]]
+    grace_period  = "15s"
+    interval      = "15s"
+    timeout       = "5s"

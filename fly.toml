@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Fly.io configuration — Face API
+# Deploy: fly deploy
+# First time: fly launch --no-deploy, then fly deploy
+# ─────────────────────────────────────────────────────────────────────────────
+
+app            = "face-api"        # Change to your unique app name
+primary_region = "lhr"             # lhr=London (matches existing Postgres volume)
+
+[build]
+  dockerfile = "Dockerfile"
+
+# ── Non-secret environment variables ─────────────────────────────────────────
+# Secrets (DB_URL, REDIS_URL, PASETO_SECRET) are set via:
+#   fly secrets set KEY=value
+[env]
+  GIN_MODE    = "release"
+  PORT        = "8080"
+  MODELS_DIR  = "/app/models"
+
+# ── HTTP service ──────────────────────────────────────────────────────────────
+[http_service]
+  internal_port       = 8080
+  force_https         = true
+  auto_stop_machines  = "stop"   # stop idle machines to save cost
+  auto_start_machines = true
+  min_machines_running = 0       # free tier: let machines stop when idle
+
+  [http_service.concurrency]
+    type       = "requests"
+    hard_limit = 50
+    soft_limit = 25
+
+# ── Machine size ──────────────────────────────────────────────────────────────
+# dlib + pgvector queries are CPU and memory intensive.
+# shared-cpu-2x / 4096 MB is the minimum comfortable size.
+# Scale up to performance-2x for production traffic.
+[[vm]]
+  cpu_kind  = "shared"
+  cpus      = 2
+  memory_mb = 4096
+
+# ── Health check ──────────────────────────────────────────────────────────────
+[[http_service.checks]]
+  grace_period = "30s"
+  interval     = "30s"
+  method       = "GET"
+  path         = "/health"
+  timeout      = "10s"
