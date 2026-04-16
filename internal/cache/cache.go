@@ -57,6 +57,32 @@ func (c *Cache) IncrementUsage(ctx context.Context, apiKey string) error {
 	return err
 }
 
+// userMonthKey returns the Redis key for a user's aggregate monthly usage.
+// e.g. rate:user:uuid:2026-03
+func userMonthKey(userID string) string {
+	month := time.Now().UTC().Format("2006-01")
+	return fmt.Sprintf("rate:user:%s:%s", userID, month)
+}
+
+// IncrementUserUsage increments a user-level aggregate counter (for the dashboard).
+func (c *Cache) IncrementUserUsage(ctx context.Context, userID string) error {
+	key := userMonthKey(userID)
+	pipe := c.rdb.Pipeline()
+	pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, 32*24*time.Hour)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// GetUserMonthlyUsage returns aggregate API calls this month for a user.
+func (c *Cache) GetUserMonthlyUsage(ctx context.Context, userID string) (int64, error) {
+	val, err := c.rdb.Get(ctx, userMonthKey(userID)).Int64()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	return val, err
+}
+
 func (c *Cache) Get(ctx context.Context, key string) (string, error) {
 	return c.rdb.Get(ctx, key).Result()
 }

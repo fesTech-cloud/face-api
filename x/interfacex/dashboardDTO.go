@@ -28,9 +28,15 @@ type UserResponse struct {
 }
 
 type CreatePlanRequest struct {
-	Name        string `json:"name" binding:"required"`
-	CallLimit   int    `json:"call_limit" binding:"required"`
-	PriceNaira  int    `json:"price_naira" binding:"required"`
+	Name       string `json:"name" binding:"required"`
+	CallLimit  int    `json:"call_limit" binding:"required,min=1"`
+	PriceNaira int    `json:"price_naira" binding:"min=0"`
+}
+
+type UpdatePlanRequest struct {
+	Name       string `json:"name"`
+	CallLimit  int    `json:"call_limit" binding:"min=0"`
+	PriceNaira int    `json:"price_naira" binding:"min=0"`
 }
 
 type ActivatePlanRequest struct {

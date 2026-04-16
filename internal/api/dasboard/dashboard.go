@@ -14,6 +14,29 @@ import (
 	"face-api/x/security"
 )
 
+// GetUsage returns the authenticated user's aggregate API usage for the current month.
+func (h *DashboardHandler) GetUsage(c *gin.Context) {
+	user := c.MustGet("user").(*store.User)
+
+	plan, err := h.db.GetPlanByID(c.Request.Context(), user.PlanID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load plan"})
+		return
+	}
+
+	used, _ := h.cache.GetUserMonthlyUsage(c.Request.Context(), user.ID.String())
+
+	now := time.Now().UTC()
+	resetDate := time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)
+
+	c.JSON(http.StatusOK, gin.H{
+		"used":       used,
+		"limit":      plan.CallLimit,
+		"period":     now.Format("2006-01"),
+		"reset_date": resetDate.Format("2006-01-02"),
+	})
+}
+
 type DashboardHandler struct {
 	db        *store.Store
 	cache     *cache.Cache
@@ -37,6 +60,15 @@ func (h *DashboardHandler) CreateAccount(c *gin.Context) {
 		return
 	}
 
+	// Always register new users on the free plan regardless of the plan_id sent.
+	// Paid plan upgrades happen via Paystack after login.
+	freePlan, err := h.db.GetFreePlan(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "no free plan available; please contact support"})
+		return
+	}
+	req.PlanID = freePlan.ID
+
 	_, err = h.db.CreateUser(c.Request.Context(), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create account"})
@@ -44,7 +76,6 @@ func (h *DashboardHandler) CreateAccount(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "account created successfully"})
-
 }
 
 func (h *DashboardHandler) CreateAPIKey(c *gin.Context) {

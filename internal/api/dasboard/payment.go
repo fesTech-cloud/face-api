@@ -14,6 +14,12 @@ import (
 	"face-api/internal/store"
 )
 
+// parseUUID safely parses a UUID string, returning uuid.Nil on failure.
+func parseUUID(s string) uuid.UUID {
+	id, _ := uuid.Parse(s)
+	return id
+}
+
 // ── POST /dashboard/payment/initialize ───────────────────────────────────────
 // Authenticated. Creates a pending subscription and returns a Paystack
 // authorization URL that the frontend should redirect the user to.
@@ -100,6 +106,7 @@ func (h *DashboardHandler) InitializePayment(c *gin.Context) {
 		"authorization_url": initResp.Data.AuthorizationURL,
 		"reference":         initResp.Data.Reference,
 		"access_code":       initResp.Data.AccessCode,
+		"public_key":        os.Getenv("PAYSTACK_PUBLIC_KEY"),
 	})
 }
 
@@ -139,13 +146,26 @@ func (h *DashboardHandler) VerifyPayment(c *gin.Context) {
 	}
 
 	customerCode := verifyResp.Data.Customer.CustomerCode
-	if err := h.db.ActivateSubscription(c.Request.Context(), reference, customerCode); err != nil {
+
+	// Use the authenticated user from context (reliable) and plan_id from the
+	// query param sent by the frontend (fallback from metadata which may be empty).
+	user := c.MustGet("user").(*store.User)
+	planIDStr := c.Query("plan_id")
+	if planIDStr == "" {
+		planIDStr = verifyResp.Data.Metadata["plan_id"]
+	}
+	activatePlanID, err := uuid.Parse(planIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing or invalid plan_id"})
+		return
+	}
+
+	if err := h.db.ActivateSubscription(c.Request.Context(), reference, customerCode, user.ID, activatePlanID, verifyResp.Data.Amount); err != nil {
 		log.Printf("activate subscription: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "payment verified but plan activation failed"})
 		return
 	}
 
-	user := c.MustGet("user").(*store.User)
 	updatedUser, _ := h.db.GetUserById(c.Request.Context(), user.ID.String())
 
 	c.JSON(http.StatusOK, gin.H{
@@ -196,7 +216,9 @@ func (h *DashboardHandler) PaystackWebhook(c *gin.Context) {
 
 		if data.Status == "success" {
 			customerCode := data.Customer.CustomerCode
-			if err := h.db.ActivateSubscription(c.Request.Context(), data.Reference, customerCode); err != nil {
+			metaUserID := parseUUID(data.Metadata["user_id"])
+			metaPlanID := parseUUID(data.Metadata["plan_id"])
+			if err := h.db.ActivateSubscription(c.Request.Context(), data.Reference, customerCode, metaUserID, metaPlanID, data.Amount); err != nil {
 				log.Printf("paystack webhook: activate subscription %s: %v", data.Reference, err)
 			} else {
 				log.Printf("paystack webhook: subscription activated for reference %s", data.Reference)

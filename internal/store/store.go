@@ -376,6 +376,20 @@ func (s *Store) GetPlanByID(ctx context.Context, id uuid.UUID) (*Plan, error) {
 	return &plan, nil
 }
 
+// GetFreePlan returns the first plan with price_naira = 0, ordered by call_limit ascending.
+// Used to assign a default plan to new users at signup; they pay to upgrade later.
+func (s *Store) GetFreePlan(ctx context.Context) (*Plan, error) {
+	var plan Plan
+	err := s.db.WithContext(ctx).
+		Where("price_naira = 0").
+		Order("call_limit ASC").
+		First(&plan).Error
+	if err != nil {
+		return nil, fmt.Errorf("no free plan found: %w", err)
+	}
+	return &plan, nil
+}
+
 func (s *Store) GetAllPlans(ctx context.Context) ([]Plan, error) {
 	var plans []Plan
 	err := s.db.WithContext(ctx).Find(&plans).Error
@@ -406,6 +420,47 @@ func (s *Store) CreatePlan(ctx context.Context, req interfacex.CreatePlanRequest
 	}
 
 	return &plan, nil
+}
+
+// UpdatePlan applies partial updates to a plan.
+func (s *Store) UpdatePlan(ctx context.Context, planID uuid.UUID, req interfacex.UpdatePlanRequest) (*Plan, error) {
+	updates := map[string]any{}
+	if req.Name != "" {
+		updates["name"] = req.Name
+	}
+	if req.CallLimit > 0 {
+		updates["call_limit"] = req.CallLimit
+	}
+	// PriceNaira can legitimately be 0 (free plan), so we always include it
+	updates["price_naira"] = req.PriceNaira
+
+	if len(updates) == 0 {
+		return s.GetPlanByID(ctx, planID)
+	}
+
+	if err := s.db.WithContext(ctx).Model(&Plan{}).Where("id = ?", planID).Updates(updates).Error; err != nil {
+		return nil, fmt.Errorf("update plan: %w", err)
+	}
+	return s.GetPlanByID(ctx, planID)
+}
+
+// DeletePlan removes a plan. Returns an error if users are still on this plan.
+func (s *Store) DeletePlan(ctx context.Context, planID uuid.UUID) error {
+	var count int64
+	if err := s.db.WithContext(ctx).Model(&User{}).Where("plan_id = ?", planID).Count(&count).Error; err != nil {
+		return fmt.Errorf("check plan users: %w", err)
+	}
+	if count > 0 {
+		return fmt.Errorf("cannot delete plan: %d user(s) are currently on this plan", count)
+	}
+	result := s.db.WithContext(ctx).Delete(&Plan{}, "id = ?", planID)
+	if result.Error != nil {
+		return fmt.Errorf("delete plan: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("plan not found")
+	}
+	return nil
 }
 
 func (s *Store) ActivatePlan(ctx context.Context, userID uuid.UUID, planID uuid.UUID) (*User, error) {
@@ -624,19 +679,32 @@ func (s *Store) CreateSubscription(ctx context.Context, userID, planID uuid.UUID
 }
 
 // ActivateSubscription marks a subscription as active and switches the user's plan.
+// userID and planID are used as a fallback when the subscription record was never
+// pre-created (e.g. CreateSubscription failed silently during initialize).
 // Runs in a transaction so both updates succeed or neither does.
-func (s *Store) ActivateSubscription(ctx context.Context, reference string, customerCode string) error {
+func (s *Store) ActivateSubscription(ctx context.Context, reference, customerCode string, userID, planID uuid.UUID, amountKobo int) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var sub Subscription
-		if err := tx.Where("paystack_reference = ?", reference).First(&sub).Error; err != nil {
-			return fmt.Errorf("subscription not found: %w", err)
-		}
-
-		if err := tx.Model(&sub).Updates(map[string]any{
-			"status":     "active",
-			"updated_at": time.Now(),
-		}).Error; err != nil {
-			return fmt.Errorf("update subscription status: %w", err)
+		err := tx.Where("paystack_reference = ?", reference).First(&sub).Error
+		if err != nil {
+			// Record was never created — insert it now as active.
+			sub = Subscription{
+				UserID:            userID,
+				PlanID:            planID,
+				PaystackReference: reference,
+				Status:            "active",
+				AmountPaid:        amountKobo,
+			}
+			if err2 := tx.Create(&sub).Error; err2 != nil {
+				return fmt.Errorf("create subscription: %w", err2)
+			}
+		} else {
+			if err := tx.Model(&sub).Updates(map[string]any{
+				"status":     "active",
+				"updated_at": time.Now(),
+			}).Error; err != nil {
+				return fmt.Errorf("update subscription status: %w", err)
+			}
 		}
 
 		updates := map[string]any{"plan_id": sub.PlanID}

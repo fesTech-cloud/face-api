@@ -111,6 +111,8 @@ func main() {
 		adminRoute.GET("/api-keys", h.ListAPIKeys)
 		adminRoute.DELETE("/api-keys/:id", h.RevokeAPIKey)
 		adminRoute.GET("/usage-logs", h.ListUsageLogs)
+		adminRoute.PATCH("/plans/:id", h.UpdatePlan)
+		adminRoute.DELETE("/plans/:id", h.DeletePlan)
 	}
 
 	dashboardRoute := r.Group("/dashboard")
@@ -132,6 +134,9 @@ func main() {
 			authenticated.POST("/webhooks", h.CreateWebhook)
 			authenticated.GET("/webhooks", h.ListWebhooks)
 			authenticated.DELETE("/webhooks/:id", h.DeleteWebhook)
+
+			// Usage summary
+			authenticated.GET("/usage", h.GetUsage)
 
 			// Paystack payment
 			authenticated.POST("/payment/initialize", h.InitializePayment)

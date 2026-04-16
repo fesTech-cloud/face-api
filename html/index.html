@@ -863,13 +863,21 @@
         </div>
         <div class="sidebar-section">
           <div class="sidebar-label">Plans</div>
+          <button class="endpoint-btn" onclick="showPanel('plans-manage')">
+            <span class="method-badge get">GET</span>
+            <span class="ep-name">/plans (manage)</span>
+          </button>
           <button class="endpoint-btn" onclick="showPanel('plans-get')">
             <span class="method-badge get">GET</span>
-            <span class="ep-name">/plans</span>
+            <span class="ep-name">/plans (raw)</span>
           </button>
           <button class="endpoint-btn" onclick="showPanel('plans-post')">
             <span class="method-badge post">POST</span>
             <span class="ep-name">/plans</span>
+          </button>
+          <button class="endpoint-btn" onclick="showPanel('plans-edit')">
+            <span class="method-badge patch" style="background:#7c3aed22;color:#a78bfa">PATCH</span>
+            <span class="ep-name">/plans/:id</span>
           </button>
           <button class="endpoint-btn" onclick="showPanel('plans-activate')">
             <span class="method-badge post">POST</span>
@@ -1068,8 +1076,12 @@
               min="1"
             />
           </div>
-          <div class="field">
-            <label>Price (cents)</label>
+          <div class="field" style="display:flex;align-items:center;gap:10px">
+            <input type="checkbox" id="planIsFree" onchange="togglePlanPrice(this,'planPriceNaira')" style="width:16px;height:16px;cursor:pointer" />
+            <label style="margin:0;cursor:pointer" for="planIsFree">Free plan (price = ₦0)</label>
+          </div>
+          <div class="field" id="planPriceField">
+            <label>Price (₦ Naira / month)</label>
             <input
               type="number"
               id="planPriceNaira"
@@ -1080,6 +1092,53 @@
           <button class="btn btn-green btn-full" onclick="runCreatePlan()">
             <div class="spinner" id="plansPostSpinner"></div>
             CREATE PLAN
+          </button>
+        </div>
+
+        <!-- Manage /plans (list with edit/delete) -->
+        <div class="ep-panel" id="panel-plans-manage">
+          <div class="ep-header">
+            <span class="method-badge get" style="font-size: 11px; padding: 4px 10px">GET</span>
+            <span class="ep-path">/dashboard/plans — Manage</span>
+          </div>
+          <p class="ep-desc">Fetch all plans and manage them (edit / delete).</p>
+          <button class="btn btn-green" onclick="runManagePlans()">
+            <div class="spinner" id="plansManageSpinner"></div>
+            LOAD PLANS
+          </button>
+          <div id="plansManageList" style="margin-top:16px"></div>
+        </div>
+
+        <!-- PATCH /admin/plans/:id -->
+        <div class="ep-panel" id="panel-plans-edit">
+          <div class="ep-header">
+            <span class="method-badge patch" style="font-size:11px;padding:4px 10px;background:#7c3aed22;color:#a78bfa">PATCH</span>
+            <span class="ep-path">/admin/plans/:id</span>
+          </div>
+          <p class="ep-desc">Update an existing plan. Requires admin token.</p>
+          <div class="field">
+            <label>Plan ID (UUID)</label>
+            <input type="text" id="editPlanId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          </div>
+          <div class="field">
+            <label>New Name (leave blank to keep)</label>
+            <input type="text" id="editPlanName" placeholder="e.g. Pro" />
+          </div>
+          <div class="field">
+            <label>New Call Limit (0 = keep)</label>
+            <input type="number" id="editPlanCallLimit" placeholder="e.g. 5000" min="0" value="0" />
+          </div>
+          <div class="field" style="display:flex;align-items:center;gap:10px">
+            <input type="checkbox" id="editPlanIsFree" onchange="togglePlanPrice(this,'editPlanPriceNaira')" style="width:16px;height:16px;cursor:pointer" />
+            <label style="margin:0;cursor:pointer" for="editPlanIsFree">Set as Free plan (price = ₦0)</label>
+          </div>
+          <div class="field" id="editPlanPriceField">
+            <label>New Price (₦ Naira)</label>
+            <input type="number" id="editPlanPriceNaira" placeholder="e.g. 2900" min="0" value="0" />
+          </div>
+          <button class="btn btn-green btn-full" onclick="runUpdatePlan()">
+            <div class="spinner" id="plansEditSpinner"></div>
+            UPDATE PLAN
           </button>
         </div>
 
@@ -1875,8 +1934,9 @@
       async function runCreatePlan() {
         const name = $("planName").value.trim();
         const call_limit = parseInt($("planCallLimit").value);
-        const price_naira = parseInt($("planPriceNaira").value);
-        if (!name || !call_limit || isNaN(price_naira)) {
+        const isFree = $("planIsFree").checked;
+        const price_naira = isFree ? 0 : parseInt($("planPriceNaira").value);
+        if (!name || !call_limit || (!isFree && isNaN(price_naira))) {
           alert("Please fill in all plan fields.");
           return;
         }
@@ -1886,6 +1946,104 @@
           { name, call_limit, price_naira },
           "plansPostSpinner",
         );
+      }
+
+      function togglePlanPrice(checkbox, priceInputId) {
+        const priceField = checkbox.id === "planIsFree" ? $("planPriceField") : $("editPlanPriceField");
+        const priceInput = $(priceInputId);
+        if (checkbox.checked) {
+          priceField.style.display = "none";
+          priceInput.value = "0";
+        } else {
+          priceField.style.display = "";
+        }
+      }
+
+      // ── GET /plans (manage) ───────────────────────────────────────────────────────
+      async function runManagePlans() {
+        const spinner = $("plansManageSpinner");
+        spinner.style.display = "inline-block";
+        try {
+          const res = await fetch("/dashboard/plans");
+          const data = await res.json();
+          const plans = data.plans ?? [];
+          const list = $("plansManageList");
+          if (plans.length === 0) {
+            list.innerHTML = '<p style="color:var(--muted);font-size:12px">No plans found.</p>';
+            return;
+          }
+          list.innerHTML = plans.map(p => `
+            <div style="border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin-bottom:8px;background:var(--surface2)">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+                <div>
+                  <span style="font-family:var(--mono);font-size:12px;color:var(--green)">${p.name}</span>
+                  <span style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:8px">${p.price_naira === 0 ? "FREE" : "₦" + p.price_naira.toLocaleString() + "/mo"}</span>
+                  <span style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:8px">${p.call_limit.toLocaleString()} calls/mo</span>
+                </div>
+                <div style="display:flex;gap:6px">
+                  <button onclick="prefillEditPlan('${p.id}','${p.name}',${p.call_limit},${p.price_naira})"
+                    style="font-family:var(--mono);font-size:10px;padding:4px 10px;background:var(--blue-dim);color:var(--blue);border:1px solid var(--blue);border-radius:4px;cursor:pointer">
+                    EDIT
+                  </button>
+                  <button onclick="runDeletePlan('${p.id}','${p.name}')"
+                    style="font-family:var(--mono);font-size:10px;padding:4px 10px;background:var(--red-dim);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer">
+                    DELETE
+                  </button>
+                </div>
+              </div>
+              <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:6px">${p.id}</div>
+            </div>
+          `).join("");
+        } catch (e) {
+          $("plansManageList").innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load plans.</p>';
+        } finally {
+          spinner.style.display = "none";
+        }
+      }
+
+      function prefillEditPlan(id, name, callLimit, priceNaira) {
+        $("editPlanId").value = id;
+        $("editPlanName").value = name;
+        $("editPlanCallLimit").value = callLimit;
+        $("editPlanIsFree").checked = priceNaira === 0;
+        $("editPlanPriceNaira").value = priceNaira;
+        togglePlanPrice($("editPlanIsFree"), "editPlanPriceNaira");
+        showPanel("plans-edit");
+      }
+
+      // ── PATCH /admin/plans/:id ────────────────────────────────────────────────────
+      async function runUpdatePlan() {
+        const id = $("editPlanId").value.trim();
+        if (!id) { alert("Plan ID is required."); return; }
+        const isFree = $("editPlanIsFree").checked;
+        const name = $("editPlanName").value.trim();
+        const call_limit = parseInt($("editPlanCallLimit").value) || 0;
+        const price_naira = isFree ? 0 : (parseInt($("editPlanPriceNaira").value) || 0);
+        const body = { price_naira };
+        if (name) body.name = name;
+        if (call_limit > 0) body.call_limit = call_limit;
+        await callAPI("PATCH", `/admin/plans/${id}`, body, "plansEditSpinner");
+      }
+
+      // ── DELETE /admin/plans/:id ───────────────────────────────────────────────────
+      async function runDeletePlan(id, name) {
+        if (!confirm(`Delete plan "${name}"?\n\nThis will fail if any users are on this plan.`)) return;
+        const token = $("apiKey").value.trim();
+        try {
+          const res = await fetch(`/admin/plans/${id}`, {
+            method: "DELETE",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          const data = await res.json();
+          if (res.ok) {
+            alert(`Plan "${name}" deleted.`);
+            runManagePlans();
+          } else {
+            alert("Error: " + (data.error ?? "Unknown error"));
+          }
+        } catch (e) {
+          alert("Request failed: " + e.message);
+        }
       }
 
       // ── /match ────────────────────────────────────────────────────────────────────

@@ -43,8 +43,9 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 			return
 		}
 
-		// Increment usage counter
+		// Increment usage counters (per-key and per-user aggregate)
 		_ = rdb.IncrementUsage(c.Request.Context(), token)
+		_ = rdb.IncrementUserUsage(c.Request.Context(), keyRecord.UserID.String())
 
 		// Attach key info to context for handlers
 		c.Set("api_key", token)

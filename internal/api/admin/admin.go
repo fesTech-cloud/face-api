@@ -9,6 +9,7 @@ import (
 
 	"face-api/internal/cache"
 	"face-api/internal/store"
+	"face-api/x/interfacex"
 )
 
 type Handler struct {
@@ -193,6 +194,47 @@ func (h *Handler) ListUsageLogs(c *gin.Context) {
 		"page":      page,
 		"page_size": pageSize,
 	})
+}
+
+// ── PATCH /admin/plans/:id ────────────────────────────────────────────────────
+
+func (h *Handler) UpdatePlan(c *gin.Context) {
+	planID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan id"})
+		return
+	}
+
+	var body interfacex.UpdatePlanRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	plan, err := h.db.UpdatePlan(c.Request.Context(), planID, body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "plan updated", "plan": plan})
+}
+
+// ── DELETE /admin/plans/:id ───────────────────────────────────────────────────
+
+func (h *Handler) DeletePlan(c *gin.Context) {
+	planID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid plan id"})
+		return
+	}
+
+	if err := h.db.DeletePlan(c.Request.Context(), planID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "plan_id": planID})
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
