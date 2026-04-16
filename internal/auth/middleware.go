@@ -3,6 +3,7 @@ package auth
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,10 +12,14 @@ import (
 	"face-api/x/security"
 )
 
-// APIKeyMiddleware validates the Bearer token and enforces quota.
+// APIKeyMiddleware validates the Bearer token, enforces burst + monthly quota.
 func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
+	const (
+		maxFailuresPerIP = 50             // block after 50 bad keys per minute per IP
+		failureWindow    = time.Minute
+		maxBurstPerSec   = 30             // max 30 requests/second per key
+	)
 	return func(c *gin.Context) {
-		// Extract token from Authorization: Bearer sk_live_...
 		header := c.GetHeader("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -23,15 +28,37 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 			return
 		}
 		token := strings.TrimPrefix(header, "Bearer ")
-		// Validate key against DB
+
+		// Brute-force protection: block IPs with too many bad key attempts.
+		allowed, _ := rdb.CheckAPIKeyFailures(c.Request.Context(), c.ClientIP(), maxFailuresPerIP, failureWindow)
+		if !allowed {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "too many failed authentication attempts, please try again later",
+			})
+			return
+		}
+
+		// Validate key against DB.
 		keyRecord, err := db.GetAPIKeyCached(c.Request.Context(), token)
 		if err != nil || keyRecord == nil {
+			// Count this failure for brute-force tracking.
+			_, _ = rdb.CheckAPIKeyFailures(c.Request.Context(), c.ClientIP(), maxFailuresPerIP, failureWindow)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error": "invalid API key",
 			})
 			return
 		}
-		// Check monthly quota via Redis
+
+		// Burst rate limit: max N req/sec per key.
+		burstOK, _ := rdb.CheckBurstLimit(c.Request.Context(), token, maxBurstPerSec)
+		if !burstOK {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "request rate limit exceeded, slow down",
+			})
+			return
+		}
+
+		// Monthly quota check.
 		used, err := rdb.GetMonthlyUsage(c.Request.Context(), token)
 		if err == nil && used >= int64(keyRecord.CallLimit) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
@@ -43,11 +70,10 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 			return
 		}
 
-		// Increment usage counters (per-key and per-user aggregate)
+		// Increment usage counters (per-key and per-user aggregate).
 		_ = rdb.IncrementUsage(c.Request.Context(), token)
 		_ = rdb.IncrementUserUsage(c.Request.Context(), keyRecord.UserID.String())
 
-		// Attach key info to context for handlers
 		c.Set("api_key", token)
 		c.Set("user_id", keyRecord.UserID.String())
 		c.Set("call_limit", keyRecord.CallLimit)

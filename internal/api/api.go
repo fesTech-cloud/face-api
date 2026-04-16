@@ -1,10 +1,9 @@
 package api
 
 import (
+	"context"
 	"math"
 	"net/http"
-	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,12 +15,52 @@ import (
 	"face-api/internal/webhook"
 )
 
-// matchesDir returns an absolute path to logs/matches/ relative to this source file.
-func matchesDir() string {
-	_, file, _, _ := runtime.Caller(0)
-	root := filepath.Join(filepath.Dir(file), "..", "..", "logs", "matches")
-	abs, _ := filepath.Abs(root)
-	return abs
+// engineTimeout is the maximum time allowed for a single face embedding call.
+const engineTimeout = 30 * time.Second
+
+// embedWithTimeout wraps engine.EmbedBase64 in a context deadline.
+func (h *Handler) embedWithTimeout(parent context.Context, b64 string) ([128]float32, engine.BBox, error) {
+	ctx, cancel := context.WithTimeout(parent, engineTimeout)
+	defer cancel()
+
+	type result struct {
+		emb  [128]float32
+		bbox engine.BBox
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		emb, bbox, err := h.engine.EmbedBase64(b64)
+		ch <- result{emb, bbox, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.emb, r.bbox, r.err
+	case <-ctx.Done():
+		return [128]float32{}, engine.BBox{}, context.DeadlineExceeded
+	}
+}
+
+// detectWithTimeout wraps engine.DetectBase64 in a context deadline.
+func (h *Handler) detectWithTimeout(parent context.Context, b64 string) ([]engine.DetectedFace, error) {
+	ctx, cancel := context.WithTimeout(parent, engineTimeout)
+	defer cancel()
+
+	type result struct {
+		faces []engine.DetectedFace
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		faces, err := h.engine.DetectBase64(b64)
+		ch <- result{faces, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.faces, r.err
+	case <-ctx.Done():
+		return nil, context.DeadlineExceeded
+	}
 }
 
 // maxBase64ImageSize is ~10 MB decoded (~13.3 MB base64 encoded).
@@ -63,27 +102,13 @@ func (h *Handler) Match(c *gin.Context) {
 		return
 	}
 
-	// callID := "cm_" + uuid.New().String()[:8]
-
-	// outDir := matchesDir()
-	// if err := os.MkdirAll(outDir, 0755); err != nil {
-	// 	log.Printf("matches dir: %v", err)
-	// } else {
-	// 	if err := engine.SaveBase64ToFile(req.ImageA, filepath.Join(outDir, callID+"_a.jpg")); err != nil {
-	// 		log.Printf("save image_a: %v", err)
-	// 	}
-	// 	if err := engine.SaveBase64ToFile(req.ImageB, filepath.Join(outDir, callID+"_b.jpg")); err != nil {
-	// 		log.Printf("save image_b: %v", err)
-	// 	}
-	// }
-
-	embA, bboxA, err := h.engine.EmbedBase64(req.ImageA)
+	embA, bboxA, err := h.embedWithTimeout(c.Request.Context(), req.ImageA)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "face_a: " + err.Error()})
 		return
 	}
 
-	embB, bboxB, err := h.engine.EmbedBase64(req.ImageB)
+	embB, bboxB, err := h.embedWithTimeout(c.Request.Context(), req.ImageB)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "face_b: " + err.Error()})
 		return
@@ -125,13 +150,13 @@ func (h *Handler) Verify(c *gin.Context) {
 		return
 	}
 
-	embSelfie, _, err := h.engine.EmbedBase64(req.Selfie)
+	embSelfie, _, err := h.embedWithTimeout(c.Request.Context(), req.Selfie)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "selfie: " + err.Error()})
 		return
 	}
 
-	embID, _, err := h.engine.EmbedBase64(req.IDPhoto)
+	embID, _, err := h.embedWithTimeout(c.Request.Context(), req.IDPhoto)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "id_photo: " + err.Error()})
 		return
@@ -163,7 +188,7 @@ func (h *Handler) Detect(c *gin.Context) {
 		return
 	}
 
-	faces, err := h.engine.DetectBase64(req.Image)
+	faces, err := h.detectWithTimeout(c.Request.Context(), req.Image)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
@@ -219,6 +244,18 @@ func (h *Handler) Enroll(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if len(req.Collection) > 128 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "collection name must be 128 characters or fewer"})
+		return
+	}
+	if len(req.PersonID) > 255 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "person_id must be 255 characters or fewer"})
+		return
+	}
+	if len(req.Metadata) > 1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "metadata must be 1024 characters or fewer"})
+		return
+	}
 	if !validateImageSize(req.Image) {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image exceeds maximum allowed size (10 MB)"})
 		return
@@ -230,7 +267,7 @@ func (h *Handler) Enroll(c *gin.Context) {
 		return
 	}
 
-	emb, _, err := h.engine.EmbedBase64(req.Image)
+	emb, _, err := h.embedWithTimeout(c.Request.Context(), req.Image)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
@@ -271,6 +308,10 @@ func (h *Handler) Search(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if len(req.Collection) > 128 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "collection name must be 128 characters or fewer"})
+		return
+	}
 	if !validateImageSize(req.Image) {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image exceeds maximum allowed size (10 MB)"})
 		return
@@ -291,7 +332,7 @@ func (h *Handler) Search(c *gin.Context) {
 		return
 	}
 
-	emb, _, err := h.engine.EmbedBase64(req.Image)
+	emb, _, err := h.embedWithTimeout(c.Request.Context(), req.Image)
 	if err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return

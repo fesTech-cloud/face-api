@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -40,6 +41,13 @@ func (h *DashboardHandler) InitializePayment(c *gin.Context) {
 	}
 
 	user := c.MustGet("user").(*store.User)
+
+	// Rate limit: max 5 payment initializations per hour per user.
+	allowed, _ := h.cache.CheckPaymentInitLimit(c.Request.Context(), user.ID.String(), 5, time.Hour)
+	if !allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many payment attempts, please try again later"})
+		return
+	}
 
 	plan, err := h.db.GetPlanByID(c.Request.Context(), planID)
 	if err != nil {
@@ -145,11 +153,19 @@ func (h *DashboardHandler) VerifyPayment(c *gin.Context) {
 		return
 	}
 
+	// Guard: ensure the payment was made by the authenticated user.
+	// This prevents User A from activating User B's payment reference.
+	authUser := c.MustGet("user").(*store.User)
+	if verifyResp.Data.Customer.Email != authUser.Email {
+		log.Printf("verify payment: email mismatch: paystack=%s auth=%s ref=%s",
+			verifyResp.Data.Customer.Email, authUser.Email, reference)
+		c.JSON(http.StatusForbidden, gin.H{"error": "payment reference does not belong to your account"})
+		return
+	}
+
 	customerCode := verifyResp.Data.Customer.CustomerCode
 
-	// Use the authenticated user from context (reliable) and plan_id from the
-	// query param sent by the frontend (fallback from metadata which may be empty).
-	user := c.MustGet("user").(*store.User)
+	// plan_id comes from the query param (set by frontend); fall back to Paystack metadata.
 	planIDStr := c.Query("plan_id")
 	if planIDStr == "" {
 		planIDStr = verifyResp.Data.Metadata["plan_id"]
@@ -160,13 +176,13 @@ func (h *DashboardHandler) VerifyPayment(c *gin.Context) {
 		return
 	}
 
-	if err := h.db.ActivateSubscription(c.Request.Context(), reference, customerCode, user.ID, activatePlanID, verifyResp.Data.Amount); err != nil {
+	if err := h.db.ActivateSubscription(c.Request.Context(), reference, customerCode, authUser.ID, activatePlanID, verifyResp.Data.Amount); err != nil {
 		log.Printf("activate subscription: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "payment verified but plan activation failed"})
 		return
 	}
 
-	updatedUser, _ := h.db.GetUserById(c.Request.Context(), user.ID.String())
+	updatedUser, _ := h.db.GetUserById(c.Request.Context(), authUser.ID.String())
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Payment verified and plan activated",

@@ -107,6 +107,8 @@ func (h *Handler) AssignPlan(c *gin.Context) {
 		return
 	}
 
+	caller := c.MustGet("user").(*store.User)
+	h.db.WriteAuditLog(c.Request.Context(), caller.ID, caller.Email, "admin.plan.assign", userID.String(), c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"message": "plan assigned", "user": user})
 }
 
@@ -131,6 +133,7 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 		return
 	}
 
+	h.db.WriteAuditLog(c.Request.Context(), caller.ID, caller.Email, "admin.user.delete", userID.String(), c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "user_id": userID})
 }
 
@@ -170,6 +173,8 @@ func (h *Handler) RevokeAPIKey(c *gin.Context) {
 		return
 	}
 
+	caller := c.MustGet("user").(*store.User)
+	h.db.WriteAuditLog(c.Request.Context(), caller.ID, caller.Email, "admin.api_key.revoke", keyID.String(), c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"revoked": true, "key_id": keyID})
 }
 
@@ -185,6 +190,26 @@ func (h *Handler) ListUsageLogs(c *gin.Context) {
 	logs, total, err := h.db.AdminListUsageLogs(c.Request.Context(), userIDFilter, endpoint, page, pageSize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list usage logs"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":      logs,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
+}
+
+// ── GET /admin/audit-logs ─────────────────────────────────────────────────────
+
+func (h *Handler) ListAuditLogs(c *gin.Context) {
+	page := queryInt(c, "page", 1)
+	pageSize := queryInt(c, "page_size", 25)
+
+	logs, total, err := h.db.AdminListAuditLogs(c.Request.Context(), page, pageSize)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list audit logs"})
 		return
 	}
 

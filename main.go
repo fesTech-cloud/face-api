@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -60,14 +61,18 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(gin.Logger())
 	r.Use(requestid.New())
-	allowedOrigins := getEnv("ALLOWED_ORIGINS", "*")
-	corsOrigins := []string{allowedOrigins}
+	r.Use(securityHeaders())
+	// ALLOWED_ORIGINS must be explicitly set in production.
+	// Default is localhost only so a misconfigured prod deploy fails loudly.
+	rawOrigins := getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001")
+	corsOrigins := strings.Split(rawOrigins, ",")
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:  corsOrigins,
-		AllowMethods:  []string{"GET", "POST", "DELETE", "PATCH", "OPTIONS"},
-		AllowHeaders:  []string{"Origin", "Authorization", "Content-Type"},
-		ExposeHeaders: []string{"X-Request-Id"},
-		MaxAge:        1 * time.Hour,
+		AllowOrigins:     corsOrigins,
+		AllowMethods:     []string{"GET", "POST", "DELETE", "PATCH", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
+		ExposeHeaders:    []string{"X-Request-Id"},
+		AllowCredentials: false,
+		MaxAge:           1 * time.Hour,
 	}))
 
 	// ── Routes ──────────────────────────────────────────────────────────────
@@ -111,6 +116,7 @@ func main() {
 		adminRoute.GET("/api-keys", h.ListAPIKeys)
 		adminRoute.DELETE("/api-keys/:id", h.RevokeAPIKey)
 		adminRoute.GET("/usage-logs", h.ListUsageLogs)
+		adminRoute.GET("/audit-logs", h.ListAuditLogs)
 		adminRoute.PATCH("/plans/:id", h.UpdatePlan)
 		adminRoute.DELETE("/plans/:id", h.DeletePlan)
 	}
@@ -131,9 +137,12 @@ func main() {
 			authenticated.DELETE("/api-keys/:id", h.DeleteAPIKey)
 			authenticated.POST("/plans", h.CreatePlan)
 			authenticated.POST("/plans/activate", h.ActivatePlan)
+			authenticated.POST("/plans/downgrade", h.DowngradePlan)
 			authenticated.POST("/webhooks", h.CreateWebhook)
 			authenticated.GET("/webhooks", h.ListWebhooks)
 			authenticated.DELETE("/webhooks/:id", h.DeleteWebhook)
+			authenticated.POST("/webhooks/:id/rotate-secret", h.RotateWebhookSecret)
+			authenticated.GET("/webhooks/:id/deliveries", h.ListWebhookDeliveries)
 
 			// Usage summary
 			authenticated.GET("/usage", h.GetUsage)
@@ -176,6 +185,22 @@ func main() {
 		log.Fatalf("Server forced shutdown: %v", err)
 	}
 	log.Println("Server exited.")
+}
+
+// securityHeaders adds standard security response headers to every request.
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-XSS-Protection", "1; mode=block")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+		// Only send HSTS over HTTPS — skip in non-release mode to avoid breaking local HTTP dev.
+		if getEnv("GIN_MODE", "debug") == "release" {
+			c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		c.Next()
+	}
 }
 
 func healthHandler(c *gin.Context) {

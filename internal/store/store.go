@@ -128,6 +128,29 @@ type FaceEmbedding struct {
 	CreatedAt    time.Time
 }
 
+// WebhookDelivery records each delivery attempt so users can debug delivery issues.
+type WebhookDelivery struct {
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	WebhookID  uuid.UUID `gorm:"type:uuid;not null;index"                        json:"webhook_id"`
+	Event      string    `gorm:"not null"                                        json:"event"`
+	StatusCode int       `gorm:"not null;default:0"                              json:"status_code"` // 0 = network error
+	Success    bool      `gorm:"not null;default:false"                          json:"success"`
+	Attempt    int       `gorm:"not null;default:1"                              json:"attempt"`
+	Error      string    `gorm:"default:''"                                      json:"error,omitempty"`
+	CreatedAt  time.Time `gorm:"index"                                           json:"created_at"`
+}
+
+// AuditLog records sensitive operations performed by users and admins.
+type AuditLog struct {
+	ID         uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
+	ActorID    uuid.UUID `gorm:"type:uuid;not null;index"                        json:"actor_id"`
+	ActorEmail string    `gorm:"not null"                                        json:"actor_email"`
+	Action     string    `gorm:"not null"                                        json:"action"`   // e.g. "api_key.create", "plan.assign"
+	TargetID   string    `gorm:"default:''"                                      json:"target_id"` // ID of the affected resource
+	IPAddress  string    `gorm:"default:''"                                      json:"ip_address"`
+	CreatedAt  time.Time `gorm:"index"                                           json:"created_at"`
+}
+
 // FaceSearchResult is the enriched DTO returned from SearchFaces.
 type FaceSearchResult struct {
 	FaceID         uuid.UUID `json:"face_id"`
@@ -185,7 +208,9 @@ func New(dbURL string, c *cache.Cache) (*Store, error) {
 		&Collection{},
 		&FaceEmbedding{},
 		&Webhook{},
+		&WebhookDelivery{},
 		&Subscription{},
+		&AuditLog{},
 	); err != nil {
 		return nil, fmt.Errorf("automigrate: %w", err)
 	}
@@ -408,14 +433,20 @@ func (s *Store) GetUserById(ctx context.Context, id string) (*User, error) {
 	return &user, nil
 }
 
+// ErrDuplicatePlanName is returned when a plan with that name already exists.
+var ErrDuplicatePlanName = errors.New("a plan with that name already exists")
+
 func (s *Store) CreatePlan(ctx context.Context, req interfacex.CreatePlanRequest) (*Plan, error) {
 	plan := Plan{
-		Name:          req.Name,
-		CallLimit:     req.CallLimit,
+		Name:       req.Name,
+		CallLimit:  req.CallLimit,
 		PriceNaira: req.PriceNaira,
 	}
 
 	if err := s.db.WithContext(ctx).Create(&plan).Error; err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrDuplicatePlanName
+		}
 		return nil, fmt.Errorf("db create plan: %w", err)
 	}
 
@@ -472,6 +503,19 @@ func (s *Store) ActivatePlan(ctx context.Context, userID uuid.UUID, planID uuid.
 		return nil, fmt.Errorf("db activate plan: %w", err)
 	}
 
+	return s.GetUserById(ctx, userID.String())
+}
+
+// DowngradePlan moves a user back to the free plan (price_naira = 0).
+// Returns the updated user or an error if no free plan is configured.
+func (s *Store) DowngradePlan(ctx context.Context, userID uuid.UUID) (*User, error) {
+	freePlan, err := s.GetFreePlan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no free plan available: %w", err)
+	}
+	if err := s.db.WithContext(ctx).Model(&User{}).Where("id = ?", userID).Update("plan_id", freePlan.ID).Error; err != nil {
+		return nil, fmt.Errorf("db downgrade plan: %w", err)
+	}
 	return s.GetUserById(ctx, userID.String())
 }
 
@@ -596,6 +640,26 @@ func (s *Store) DeleteWebhook(ctx context.Context, userID uuid.UUID, webhookID u
 		return fmt.Errorf("webhook not found or access denied")
 	}
 	return nil
+}
+
+// RotateWebhookSecret regenerates the signing secret for a webhook.
+// Returns the new plaintext secret (shown only once).
+func (s *Store) RotateWebhookSecret(ctx context.Context, userID, webhookID uuid.UUID) (string, error) {
+	newSecret, err := generateWebhookSecret()
+	if err != nil {
+		return "", fmt.Errorf("generate secret: %w", err)
+	}
+	result := s.db.WithContext(ctx).
+		Model(&Webhook{}).
+		Where("id = ? AND user_id = ? AND is_active = true", webhookID, userID).
+		Update("secret", newSecret)
+	if result.Error != nil {
+		return "", fmt.Errorf("rotate webhook secret: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return "", fmt.Errorf("webhook not found or access denied")
+	}
+	return newSecret, nil
 }
 
 // GetActiveWebhooksForEvent returns active webhooks for a user subscribed to the given event.
@@ -725,6 +789,90 @@ func (s *Store) FailSubscription(ctx context.Context, reference string) error {
 		Model(&Subscription{}).
 		Where("paystack_reference = ?", reference).
 		Updates(map[string]any{"status": "failed", "updated_at": time.Now()}).Error
+}
+
+// ── Webhook delivery history ──────────────────────────────────────────────────
+
+// RecordDelivery persists a single webhook delivery attempt.
+// Errors are non-fatal — a logging failure must not block event dispatch.
+func (s *Store) RecordDelivery(webhookID uuid.UUID, event string, statusCode int, success bool, attempt int, errMsg string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	d := WebhookDelivery{
+		WebhookID:  webhookID,
+		Event:      event,
+		StatusCode: statusCode,
+		Success:    success,
+		Attempt:    attempt,
+		Error:      errMsg,
+	}
+	if err := s.db.WithContext(ctx).Create(&d).Error; err != nil {
+		// Non-fatal: log but continue.
+		_ = err
+	}
+}
+
+// ListWebhookDeliveries returns the most recent delivery attempts for a webhook.
+func (s *Store) ListWebhookDeliveries(ctx context.Context, userID, webhookID uuid.UUID, limit int) ([]WebhookDelivery, error) {
+	// Verify the webhook belongs to the requesting user before returning history.
+	var wh Webhook
+	if err := s.db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", webhookID, userID).
+		First(&wh).Error; err != nil {
+		return nil, fmt.Errorf("webhook not found or access denied")
+	}
+
+	var deliveries []WebhookDelivery
+	err := s.db.WithContext(ctx).
+		Where("webhook_id = ?", webhookID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&deliveries).Error
+	return deliveries, err
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+
+// WriteAuditLog inserts an audit entry. Errors are intentionally non-fatal —
+// a logging failure must never block a business operation.
+func (s *Store) WriteAuditLog(ctx context.Context, actorID uuid.UUID, actorEmail, action, targetID, ip string) {
+	entry := AuditLog{
+		ActorID:    actorID,
+		ActorEmail: actorEmail,
+		Action:     action,
+		TargetID:   targetID,
+		IPAddress:  ip,
+	}
+	if err := s.db.WithContext(ctx).Create(&entry).Error; err != nil {
+		// Use background context so a cancelled request context doesn't
+		// swallow the audit write.
+		_ = s.db.Create(&entry).Error
+	}
+}
+
+// AdminListAuditLogs returns paginated audit entries, newest first.
+func (s *Store) AdminListAuditLogs(ctx context.Context, page, pageSize int) ([]AuditLog, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 25
+	}
+	offset := (page - 1) * pageSize
+
+	var total int64
+	if err := s.db.WithContext(ctx).Model(&AuditLog{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var logs []AuditLog
+	if err := s.db.WithContext(ctx).
+		Order("created_at DESC").
+		Offset(offset).Limit(pageSize).
+		Find(&logs).Error; err != nil {
+		return nil, 0, err
+	}
+	return logs, total, nil
 }
 
 // GetSubscriptionByReference looks up a subscription by its Paystack reference.
