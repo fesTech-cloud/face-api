@@ -11,12 +11,13 @@ primary_region = "lhr"             # lhr=London (matches existing Postgres volum
   dockerfile = "Dockerfile"
 
 # ── Non-secret environment variables ─────────────────────────────────────────
-# Secrets (DB_URL, REDIS_URL, PASETO_SECRET) are set via:
+# Secrets (DB_URL, REDIS_URL, PASETO_SECRET, PAYSTACK_SECRET_KEY, PAYSTACK_PUBLIC_KEY, PAYSTACK_CALLBACK_URL, ALLOWED_ORIGINS) are set via:
 #   fly secrets set KEY=value
 [env]
   GIN_MODE    = "release"
   PORT        = "8080"
   MODELS_DIR  = "/app/models"
+  APP_ENV     = "prod"
 
 # ── HTTP service ──────────────────────────────────────────────────────────────
 [http_service]

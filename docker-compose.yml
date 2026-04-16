@@ -23,6 +23,12 @@ services:
       - STRIPE_SECRET=${STRIPE_SECRET:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - PASETO_SECRET=${PASETO_SECRET:-}
+      - PAYSTACK_PUBLIC_KEY=${PAYSTACK_PUBLIC_KEY:-}
+      - PAYSTACK_SECRET_KEY=${PAYSTACK_SECRET_KEY:-}
+      - PAYSTACK_CALLBACK_URL=${PAYSTACK_CALLBACK_URL:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - APP_ENV=${APP_ENV:-dev}
+      - PASETO_SECRET=${PASETO_SECRET:-}
     volumes:
       - ./models:/app/models:ro # face model files (read-only)
       - ./logs:/app/logs # application logs
