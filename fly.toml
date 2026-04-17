@@ -23,9 +23,9 @@ primary_region = "lhr"             # lhr=London (matches existing Postgres volum
 [http_service]
   internal_port       = 8080
   force_https         = true
-  auto_stop_machines  = "stop"   # stop idle machines to save cost
+  auto_stop_machines  = false
   auto_start_machines = true
-  min_machines_running = 0       # free tier: let machines stop when idle
+  min_machines_running = 1
 
   [http_service.concurrency]
     type       = "requests"

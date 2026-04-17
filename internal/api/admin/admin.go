@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -11,6 +12,7 @@ import (
 	"face-api/internal/cache"
 	"face-api/internal/store"
 	"face-api/x/interfacex"
+	"face-api/x/security"
 )
 
 type Handler struct {
@@ -20,6 +22,59 @@ type Handler struct {
 
 func NewHandler(db *store.Store, c *cache.Cache) *Handler {
 	return &Handler{db: db, cache: c}
+}
+
+// ── POST /admin/login ─────────────────────────────────────────────────────────
+
+func (h *Handler) Login(c *gin.Context) {
+	// Rate limit: max 10 attempts per IP per minute
+	allowed, _ := h.cache.CheckLoginRateLimit(c.Request.Context(), c.ClientIP(), 10, time.Minute)
+	if !allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many login attempts, please try again later"})
+		return
+	}
+
+	var req struct {
+		Email    string `json:"email"    binding:"required,email"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.db.GetUserByEmail(c.Request.Context(), req.Email)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	if !user.IsAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin access required"})
+		return
+	}
+
+	if !security.ComparePassword(user.PasswordHash, req.Password) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	token, err := security.NewPasetoManager().GenerateToken(user.ID.String(), user.Email, 8*time.Hour)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"token": token,
+		"user": interfacex.UserResponse{
+			ID:        user.ID,
+			Email:     user.Email,
+			BrandName: user.BrandName,
+			PlanID:    user.PlanID,
+			IsAdmin:   user.IsAdmin,
+		},
+	})
 }
 
 // ── GET /admin/stats ──────────────────────────────────────────────────────────

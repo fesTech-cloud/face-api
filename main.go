@@ -116,6 +116,12 @@ func main() {
 		face.GET("/usage", h.Usage)
 	}
 
+	// Public admin login — issues PASETO token, no Firebase involved
+	{
+		h := admin.NewHandler(db, rdb)
+		r.POST("/admin/login", h.Login)
+	}
+
 	adminRoute := r.Group("/admin")
 	adminRoute.Use(auth.AdminMiddleware(db))
 	{
