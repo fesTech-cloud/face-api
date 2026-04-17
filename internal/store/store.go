@@ -401,12 +401,21 @@ func (s *Store) GetPlanByID(ctx context.Context, id uuid.UUID) (*Plan, error) {
 	return &plan, nil
 }
 
-// CreateAdminUser creates a user with is_admin=true on the free plan.
+// CreateAdminUser creates a user with is_admin=true.
+// If no free plan exists it auto-creates one so bootstrap works on a blank DB.
 // Used only by the bootstrap endpoint — remove or gate after setup.
 func (s *Store) CreateAdminUser(ctx context.Context, email, password, brandName string) (*User, error) {
 	freePlan, err := s.GetFreePlan(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("no free plan: %w", err)
+		// No free plan yet — seed one so bootstrap works on a fresh database.
+		seeded := Plan{Name: "Free", CallLimit: 500, PriceNaira: 0}
+		if err := s.db.WithContext(ctx).Create(&seeded).Error; err != nil && !isUniqueViolation(err) {
+			return nil, fmt.Errorf("seed free plan: %w", err)
+		}
+		freePlan, err = s.GetFreePlan(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("get free plan after seed: %w", err)
+		}
 	}
 	hash, err := security.HashPassword(password)
 	if err != nil {

@@ -192,14 +192,14 @@ db-migrate: ## Run all pending SQL migrations
 	@echo "Migrations done."
 
 .PHONY: db-reset
-db-reset: ## Drop and recreate the database (DEV ONLY)
+db-reset: ## Drop and recreate the database, then restart API (DEV ONLY)
 	@echo "WARNING: This will delete all data. Press Ctrl+C to cancel..."
 	@sleep 3
-	@docker compose exec postgres psql -U $(POSTGRES_USER) \
+	@docker compose exec postgres psql -U $(POSTGRES_USER) -d postgres \
 		-c "DROP DATABASE IF EXISTS $(POSTGRES_DB);"
-	@docker compose exec postgres psql -U $(POSTGRES_USER) \
+	@docker compose exec postgres psql -U $(POSTGRES_USER) -d postgres \
 		-c "CREATE DATABASE $(POSTGRES_DB);"
-	@$(MAKE) db-migrate
+	@docker compose restart api
 	@echo "Database reset complete."
 
 .PHONY: redis-shell

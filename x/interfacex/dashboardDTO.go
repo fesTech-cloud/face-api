@@ -25,6 +25,7 @@ type UserResponse struct {
 	BrandName string    `json:"brand_name"`
 	Email     string    `json:"email"`
 	PlanID    uuid.UUID `json:"plan_id"`
+	IsAdmin   bool      `json:"is_admin"`
 }
 
 type CreatePlanRequest struct {

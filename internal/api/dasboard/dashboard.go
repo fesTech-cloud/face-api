@@ -212,6 +212,7 @@ func (h *DashboardHandler) Login(c *gin.Context) {
 		BrandName: user.BrandName,
 		Email:     user.Email,
 		PlanID:    user.PlanID,
+		IsAdmin:   user.IsAdmin,
 	}, "token": token})
 }
 
