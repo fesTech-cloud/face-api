@@ -13,6 +13,7 @@ import (
 	"face-api/internal/engine"
 	"face-api/internal/store"
 	"face-api/internal/webhook"
+	"face-api/x/security"
 )
 
 // engineTimeout is the maximum time allowed for a single face embedding call.
@@ -233,6 +234,42 @@ func (h *Handler) Detect(c *gin.Context) {
 
 // ── POST /v1/enroll ───────────────────────────────────────────────────────────
 
+// ── POST /face/session-token ──────────────────────────────────────────────────
+// Called by the customer's backend server (secret key only) to issue a
+// short-lived widget token the browser can use instead of the secret key.
+
+func (h *Handler) CreateSessionToken(c *gin.Context) {
+	if c.GetString("key_scope") != "secret" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only secret keys can issue session tokens"})
+		return
+	}
+
+	userID    := c.GetString("user_id")
+	callLimit := c.GetInt("call_limit")
+
+	const maxDuration = 5 * time.Minute
+	var body struct {
+		DurationSeconds int `json:"duration_seconds"`
+	}
+	_ = c.ShouldBindJSON(&body)
+	duration := time.Duration(body.DurationSeconds) * time.Second
+	if duration <= 0 || duration > maxDuration {
+		duration = maxDuration
+	}
+
+	token, err := security.NewPasetoManager().GenerateWidgetToken(userID, callLimit, duration)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate session token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"token":      token,
+		"expires_at": time.Now().Add(duration).UTC(),
+		"expires_in": int(duration.Seconds()),
+	})
+}
+
 func (h *Handler) Enroll(c *gin.Context) {
 	var req struct {
 		Collection string `json:"collection" binding:"required"`
@@ -386,6 +423,11 @@ func (h *Handler) ListCollections(c *gin.Context) {
 // ── DELETE /v1/collections/:id ────────────────────────────────────────────────
 
 func (h *Handler) DeleteCollection(c *gin.Context) {
+	if c.GetString("key_scope") != "secret" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "deleting collections requires a secret key"})
+		return
+	}
+
 	collectionID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection id"})

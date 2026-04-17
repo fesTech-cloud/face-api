@@ -100,8 +100,17 @@ func main() {
 		})
 	})
 
-	// Authenticated API routes
+	// Authenticated API routes — open CORS so the browser widget can call from
+	// any customer domain. Auth is enforced by APIKeyMiddleware.
 	face := r.Group("/face")
+	face.Use(cors.New(cors.Config{
+		AllowAllOrigins:  true,
+		AllowMethods:     []string{"GET", "POST", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
+		ExposeHeaders:    []string{"X-Request-Id"},
+		AllowCredentials: false,
+		MaxAge:           1 * time.Hour,
+	}))
 	face.Use(auth.APIKeyMiddleware(db, rdb))
 	{
 		h := api.NewHandler(db, rdb, faceEngine)
@@ -114,6 +123,7 @@ func main() {
 		face.GET("/collections", h.ListCollections)
 		face.DELETE("/collections/:id", h.DeleteCollection)
 		face.GET("/usage", h.Usage)
+		face.POST("/session-token", h.CreateSessionToken)
 	}
 
 	// Public admin login — issues PASETO token, no Firebase involved

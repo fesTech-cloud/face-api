@@ -3,6 +3,7 @@ package security
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"aidanwoods.dev/go-paseto"
@@ -86,6 +87,60 @@ func (m *PasetoManager) VerifyToken(tokenStr string) (*Claims, error) {
 	return &Claims{
 		UserID:    userID,
 		Email:     email,
+		ExpiresAt: expiration,
+	}, nil
+}
+
+// ── Widget / session tokens ───────────────────────────────────────────────────
+
+type WidgetClaims struct {
+	UserID    string
+	CallLimit int
+	ExpiresAt time.Time
+}
+
+// GenerateWidgetToken issues a short-lived token for the browser widget.
+// Max recommended duration is 5 minutes.
+func (m *PasetoManager) GenerateWidgetToken(userID string, callLimit int, duration time.Duration) (string, error) {
+	token := paseto.NewToken()
+	token.SetJti(uuid.New().String())
+	token.SetIssuer("face-api")
+	token.SetSubject(userID)
+	token.SetAudience("face-api-widget")
+	token.SetIssuedAt(time.Now())
+	token.SetNotBefore(time.Now())
+	token.SetExpiration(time.Now().Add(duration))
+	token.SetString("user_id", userID)
+	token.SetString("scope", "widget")
+	token.SetString("call_limit", strconv.Itoa(callLimit))
+	return token.V4Encrypt(m.secretKey, nil), nil
+}
+
+func (m *PasetoManager) VerifyWidgetToken(tokenStr string) (*WidgetClaims, error) {
+	parser := paseto.NewParser()
+	parser.AddRule(paseto.NotExpired())
+	parser.AddRule(paseto.ValidAt(time.Now()))
+	parser.AddRule(paseto.IssuedBy("face-api"))
+	parser.AddRule(paseto.ForAudience("face-api-widget"))
+
+	token, err := parser.ParseV4Local(m.secretKey, tokenStr, nil)
+	if err != nil {
+		return nil, fmt.Errorf("invalid or expired widget token: %w", err)
+	}
+
+	userID, _ := token.GetString("user_id")
+	scope, _ := token.GetString("scope")
+	if scope != "widget" {
+		return nil, fmt.Errorf("invalid token scope")
+	}
+
+	limitStr, _ := token.GetString("call_limit")
+	callLimit, _ := strconv.Atoi(limitStr)
+	expiration, _ := token.GetExpiration()
+
+	return &WidgetClaims{
+		UserID:    userID,
+		CallLimit: callLimit,
 		ExpiresAt: expiration,
 	}, nil
 }

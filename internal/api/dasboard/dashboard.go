@@ -487,3 +487,4 @@ func (h *DashboardHandler) DeleteWebhook(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "webhook_id": webhookID})
 }
+

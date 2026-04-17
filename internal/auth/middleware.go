@@ -14,11 +14,14 @@ import (
 )
 
 // APIKeyMiddleware validates the Bearer token, enforces burst + monthly quota.
+// Accepts two token forms:
+//   - PASETO widget token (starts with "v4.local.") — issued by POST /face/session-token
+//   - Secret API key — issued by /dashboard/api-keys
 func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 	const (
-		maxFailuresPerIP = 50             // block after 50 bad keys per minute per IP
+		maxFailuresPerIP = 50
 		failureWindow    = time.Minute
-		maxBurstPerSec   = 30             // max 30 requests/second per key
+		maxBurstPerSec   = 30
 	)
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
@@ -30,7 +33,31 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 		}
 		token := strings.TrimPrefix(header, "Bearer ")
 
-		// Brute-force protection: block IPs with too many bad key attempts.
+		// ── Widget session token path ─────────────────────────────────────────
+		if strings.HasPrefix(token, "v4.local.") {
+			claims, err := security.NewPasetoManager().VerifyWidgetToken(token)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired session token"})
+				return
+			}
+			used, _ := rdb.GetUserMonthlyUsage(c.Request.Context(), claims.UserID)
+			if used >= int64(claims.CallLimit) {
+				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+					"error": "monthly quota exceeded",
+					"used":  used,
+					"limit": claims.CallLimit,
+				})
+				return
+			}
+			_ = rdb.IncrementUserUsage(c.Request.Context(), claims.UserID)
+			c.Set("user_id", claims.UserID)
+			c.Set("call_limit", claims.CallLimit)
+			c.Set("key_scope", "widget")
+			c.Next()
+			return
+		}
+
+		// ── Standard API key path ─────────────────────────────────────────────
 		allowed, _ := rdb.CheckAPIKeyFailures(c.Request.Context(), c.ClientIP(), maxFailuresPerIP, failureWindow)
 		if !allowed {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
@@ -39,27 +66,19 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 			return
 		}
 
-		// Validate key against DB.
 		keyRecord, err := db.GetAPIKeyCached(c.Request.Context(), token)
 		if err != nil || keyRecord == nil {
-			// Count this failure for brute-force tracking.
 			_, _ = rdb.CheckAPIKeyFailures(c.Request.Context(), c.ClientIP(), maxFailuresPerIP, failureWindow)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid API key",
-			})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid API key"})
 			return
 		}
 
-		// Burst rate limit: max N req/sec per key.
 		burstOK, _ := rdb.CheckBurstLimit(c.Request.Context(), token, maxBurstPerSec)
 		if !burstOK {
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": "request rate limit exceeded, slow down",
-			})
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "request rate limit exceeded, slow down"})
 			return
 		}
 
-		// Monthly quota check.
 		used, err := rdb.GetMonthlyUsage(c.Request.Context(), token)
 		if err == nil && used >= int64(keyRecord.CallLimit) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
@@ -71,13 +90,13 @@ func APIKeyMiddleware(db *store.Store, rdb *cache.Cache) gin.HandlerFunc {
 			return
 		}
 
-		// Increment usage counters (per-key and per-user aggregate).
 		_ = rdb.IncrementUsage(c.Request.Context(), token)
 		_ = rdb.IncrementUserUsage(c.Request.Context(), keyRecord.UserID.String())
 
 		c.Set("api_key", token)
 		c.Set("user_id", keyRecord.UserID.String())
 		c.Set("call_limit", keyRecord.CallLimit)
+		c.Set("key_scope", "secret")
 
 		c.Next()
 	}

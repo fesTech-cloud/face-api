@@ -247,7 +247,7 @@ func (s *Store) GetAPIKey(ctx context.Context, token string) (*APIKeyRecord, err
 }
 
 func (s *Store) CreateAPIKey(ctx context.Context, req interfacex.CreateAPIKeyRequest) (*APIKeyRecord, string, error) {
-	apiKey, err := security.GenerateAPIKey(req.IsLive)
+	apiKey, err := security.GenerateAPIKey(true)
 	if err != nil {
 		return nil, "", fmt.Errorf("generate API key: %w", err)
 	}
@@ -255,11 +255,10 @@ func (s *Store) CreateAPIKey(ctx context.Context, req interfacex.CreateAPIKeyReq
 	key := APIKey{
 		UserID:  req.UserID,
 		KeyHash: apiKey.Hash,
-		IsLive:  req.IsLive,
+		IsLive:  true,
 	}
 
 	if err := s.db.WithContext(ctx).Create(&key).Error; err != nil {
-		// Handle the extremely rare DB unique violation
 		if isUniqueViolation(err) {
 			return nil, "", fmt.Errorf("key collision, please retry")
 		}
