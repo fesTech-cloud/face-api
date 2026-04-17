@@ -2,6 +2,7 @@ package admin
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -260,6 +261,45 @@ func (h *Handler) DeletePlan(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "plan_id": planID})
+}
+
+// ── POST /bootstrap/admin ─────────────────────────────────────────────────────
+// Temporary endpoint to seed the first admin account.
+// Protected by BOOTSTRAP_SECRET env var — remove from routes once done.
+
+func (h *Handler) BootstrapAdmin(c *gin.Context) {
+	secret := os.Getenv("BOOTSTRAP_SECRET")
+	if secret == "" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "bootstrap is disabled (BOOTSTRAP_SECRET not set)"})
+		return
+	}
+
+	if c.GetHeader("X-Bootstrap-Secret") != secret {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid bootstrap secret"})
+		return
+	}
+
+	var req struct {
+		Email     string `json:"email"      binding:"required"`
+		Password  string `json:"password"   binding:"required"`
+		BrandName string `json:"brand_name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user, err := h.db.CreateAdminUser(c.Request.Context(), req.Email, req.Password, req.BrandName)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "admin created — remove this endpoint when done",
+		"id":      user.ID,
+		"email":   user.Email,
+	})
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

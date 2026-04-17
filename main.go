@@ -78,6 +78,14 @@ func main() {
 	// ── Routes ──────────────────────────────────────────────────────────────
 	// Public
 	r.GET("/health", healthHandler)
+
+	// Temporary bootstrap — seed first admin account.
+	// Requires X-Bootstrap-Secret header matching BOOTSTRAP_SECRET env var.
+	// Remove this route (or unset BOOTSTRAP_SECRET) after setup.
+	{
+		bh := admin.NewHandler(db, rdb)
+		r.POST("/bootstrap/admin", bh.BootstrapAdmin)
+	}
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"service": "face-api",

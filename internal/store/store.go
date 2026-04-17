@@ -401,6 +401,33 @@ func (s *Store) GetPlanByID(ctx context.Context, id uuid.UUID) (*Plan, error) {
 	return &plan, nil
 }
 
+// CreateAdminUser creates a user with is_admin=true on the free plan.
+// Used only by the bootstrap endpoint — remove or gate after setup.
+func (s *Store) CreateAdminUser(ctx context.Context, email, password, brandName string) (*User, error) {
+	freePlan, err := s.GetFreePlan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no free plan: %w", err)
+	}
+	hash, err := security.HashPassword(password)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
+	user := User{
+		Email:        email,
+		PasswordHash: hash,
+		BrandName:    brandName,
+		PlanID:       freePlan.ID,
+		IsAdmin:      true,
+	}
+	if err := s.db.WithContext(ctx).Create(&user).Error; err != nil {
+		if isUniqueViolation(err) {
+			return nil, fmt.Errorf("email already registered")
+		}
+		return nil, fmt.Errorf("db create admin: %w", err)
+	}
+	return &user, nil
+}
+
 // GetFreePlan returns the first plan with price_naira = 0, ordered by call_limit ascending.
 // Used to assign a default plan to new users at signup; they pay to upgrade later.
 func (s *Store) GetFreePlan(ctx context.Context) (*Plan, error) {
