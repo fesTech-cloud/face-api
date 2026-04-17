@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"face-api/internal/cache"
+	"face-api/internal/firebase"
 	"face-api/internal/store"
 	"face-api/x/security"
 )
@@ -120,6 +121,56 @@ func AdminMiddleware(db *store.Store) gin.HandlerFunc {
 			return
 		}
 
+		c.Set("user", user)
+		c.Next()
+	}
+}
+
+// FirebaseTokenMiddleware verifies a Firebase ID token and sets "firebase_uid"
+// and "firebase_email" in the context. It does NOT require the user to exist in
+// the DB — used only on the /dashboard/sync endpoint.
+func FirebaseTokenMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization header"})
+			return
+		}
+		token, err := firebase.VerifyIDToken(c.Request.Context(), strings.TrimPrefix(header, "Bearer "))
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid Firebase token"})
+			return
+		}
+		email, _ := token.Claims["email"].(string)
+		c.Set("firebase_uid", token.UID)
+		c.Set("firebase_email", email)
+		c.Next()
+	}
+}
+
+// FirebaseUserMiddleware verifies a Firebase ID token and loads the matching
+// user from the DB. Aborts with 401 if the token is invalid or the user has
+// not yet been synced (call POST /dashboard/sync first).
+func FirebaseUserMiddleware(db *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing or invalid Authorization header"})
+			return
+		}
+		token, err := firebase.VerifyIDToken(c.Request.Context(), strings.TrimPrefix(header, "Bearer "))
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid Firebase token"})
+			return
+		}
+		user, err := db.GetUserByFirebaseUID(c.Request.Context(), token.UID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error":        "user not found — complete signup first",
+				"requires_sync": true,
+			})
+			return
+		}
 		c.Set("user", user)
 		c.Next()
 	}

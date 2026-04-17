@@ -51,7 +51,8 @@ type Plan struct {
 type User struct {
 	ID                   uuid.UUID `gorm:"type:uuid;primaryKey;default:uuid_generate_v4()" json:"id"`
 	Email                string    `gorm:"uniqueIndex;not null"                            json:"email"`
-	PasswordHash         string    `gorm:"not null"                                        json:"-"`
+	PasswordHash         string    `gorm:"default:''"                                      json:"-"`
+	FirebaseUID          *string   `gorm:"uniqueIndex;default:null"                        json:"-"`
 	PlanID               uuid.UUID `gorm:"type:uuid;not null"                              json:"plan_id"`
 	Plan                 Plan      `gorm:"foreignKey:PlanID"                               json:"plan"`
 	PaystackCustomerCode *string   `                                                       json:"paystack_customer_code,omitempty"`
@@ -399,6 +400,38 @@ func (s *Store) GetPlanByID(ctx context.Context, id uuid.UUID) (*Plan, error) {
 		return nil, err
 	}
 	return &plan, nil
+}
+
+// GetUserByFirebaseUID looks up a user by their Firebase UID.
+func (s *Store) GetUserByFirebaseUID(ctx context.Context, uid string) (*User, error) {
+	var user User
+	err := s.db.WithContext(ctx).Where("firebase_uid = ?", uid).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// CreateFirebaseUser creates a new user record for a Firebase-authenticated account.
+// Password is not stored — Firebase owns authentication for these users.
+func (s *Store) CreateFirebaseUser(ctx context.Context, firebaseUID, email, brandName string) (*User, error) {
+	freePlan, err := s.GetFreePlan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no free plan: %w", err)
+	}
+	user := User{
+		FirebaseUID: &firebaseUID,
+		Email:       email,
+		BrandName:   brandName,
+		PlanID:      freePlan.ID,
+	}
+	if err := s.db.WithContext(ctx).Create(&user).Error; err != nil {
+		if isUniqueViolation(err) {
+			return nil, fmt.Errorf("email already registered")
+		}
+		return nil, fmt.Errorf("db create firebase user: %w", err)
+	}
+	return &user, nil
 }
 
 // CreateAdminUser creates a user with is_admin=true.

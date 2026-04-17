@@ -6,3 +6,6 @@ logs/
 *.log
 coverage/
 EOF
+.json
+.lock
+facer-auth.json

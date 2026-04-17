@@ -21,6 +21,7 @@ import (
 	"face-api/internal/auth"
 	"face-api/internal/cache"
 	"face-api/internal/engine"
+	"face-api/internal/firebase"
 	"face-api/internal/store"
 )
 
@@ -41,6 +42,11 @@ func main() {
 		log.Fatalf("db connect: %v", err)
 	}
 	defer db.Close()
+
+	// ── Firebase Admin SDK ──────────────────────────────────────────────────
+	if err := firebase.Init(context.Background()); err != nil {
+		log.Fatalf("firebase init: %v", err)
+	}
 
 	// ── Face engine (go-face / dlib) ────────────────────────────────────────
 	modelsDir := getEnv("MODELS_DIR", "./models")
@@ -137,8 +143,11 @@ func main() {
 		dashboardRoute.POST("/login", h.Login)
 		dashboardRoute.GET("/plans", h.GetPlans)
 
+		// Firebase: create/fetch DB user after Firebase sign-in or sign-up.
+		dashboardRoute.POST("/sync", auth.FirebaseTokenMiddleware(), h.SyncUser)
+
 		authenticated := dashboardRoute.Group("/")
-		authenticated.Use(auth.AuthenticatedUserMiddleware(db))
+		authenticated.Use(auth.FirebaseUserMiddleware(db))
 		{
 			authenticated.POST("/api-keys", h.CreateAPIKey)
 			authenticated.GET("/api-keys", h.ListAPIKeys)

@@ -309,6 +309,56 @@ func (h *DashboardHandler) ActivatePlan(c *gin.Context) {
 	})
 }
 
+// ── POST /dashboard/sync ─────────────────────────────────────────────────────
+// Called by the web frontend after Firebase sign-in or sign-up.
+// Creates the DB user record on first call; returns existing user on subsequent calls.
+
+func (h *DashboardHandler) SyncUser(c *gin.Context) {
+	firebaseUID := c.GetString("firebase_uid")
+	firebaseEmail := c.GetString("firebase_email")
+
+	// Does the user already exist?
+	user, err := h.db.GetUserByFirebaseUID(c.Request.Context(), firebaseUID)
+	if err == nil {
+		// Existing user — just return their data.
+		c.JSON(http.StatusOK, gin.H{
+			"user": interfacex.UserResponse{
+				ID:        user.ID,
+				BrandName: user.BrandName,
+				Email:     user.Email,
+				PlanID:    user.PlanID,
+				IsAdmin:   user.IsAdmin,
+			},
+		})
+		return
+	}
+
+	// New user — brand_name required in body.
+	var req struct {
+		BrandName string `json:"brand_name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "brand_name is required for new accounts"})
+		return
+	}
+
+	user, err = h.db.CreateFirebaseUser(c.Request.Context(), firebaseUID, firebaseEmail, req.BrandName)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"user": interfacex.UserResponse{
+			ID:        user.ID,
+			BrandName: user.BrandName,
+			Email:     user.Email,
+			PlanID:    user.PlanID,
+			IsAdmin:   user.IsAdmin,
+		},
+	})
+}
+
 // ── POST /dashboard/plans/downgrade ──────────────────────────────────────────
 
 func (h *DashboardHandler) DowngradePlan(c *gin.Context) {
