@@ -124,12 +124,6 @@ func (h *DashboardHandler) CreateAccount(c *gin.Context) {
 }
 
 func (h *DashboardHandler) CreateAPIKey(c *gin.Context) {
-	var req interfacex.CreateAPIKeyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
 	userInterface, exists := c.Get("user")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found in context"})
@@ -142,7 +136,7 @@ func (h *DashboardHandler) CreateAPIKey(c *gin.Context) {
 		return
 	}
 
-	req.UserID = user.ID
+	req := interfacex.CreateAPIKeyRequest{UserID: user.ID}
 	keyRecord, key, err := h.db.CreateAPIKey(c.Request.Context(), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create API key"})

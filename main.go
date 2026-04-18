@@ -68,18 +68,13 @@ func main() {
 	r.Use(gin.Logger())
 	r.Use(requestid.New())
 	r.Use(securityHeaders())
-	// ALLOWED_ORIGINS must be explicitly set in production.
-	// Default is localhost only so a misconfigured prod deploy fails loudly.
+
+	// ALLOWED_ORIGINS scopes the dashboard CORS.
+	// The /face group uses AllowAllOrigins separately (see below).
+	// ALLOWED_ORIGINS must be set in production — default is localhost only
+	// so a misconfigured prod deploy fails loudly rather than silently open.
 	rawOrigins := getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001")
 	corsOrigins := strings.Split(rawOrigins, ",")
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     corsOrigins,
-		AllowMethods:     []string{"GET", "POST", "DELETE", "PATCH", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
-		ExposeHeaders:    []string{"X-Request-Id"},
-		AllowCredentials: false,
-		MaxAge:           1 * time.Hour,
-	}))
 
 	// ── Routes ──────────────────────────────────────────────────────────────
 	// Public
@@ -111,6 +106,10 @@ func main() {
 		AllowCredentials: false,
 		MaxAge:           1 * time.Hour,
 	}))
+	// Catch-all OPTIONS so the CORS preflight is handled before auth middleware.
+	// Without this gin returns 404 for OPTIONS and the middleware never fires.
+	face.OPTIONS("/*path", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
 	face.Use(auth.APIKeyMiddleware(db, rdb))
 	{
 		h := api.NewHandler(db, rdb, faceEngine)
@@ -152,6 +151,15 @@ func main() {
 	}
 
 	dashboardRoute := r.Group("/dashboard")
+	dashboardRoute.Use(cors.New(cors.Config{
+		AllowOrigins:     corsOrigins,
+		AllowMethods:     []string{"GET", "POST", "DELETE", "PATCH", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
+		ExposeHeaders:    []string{"X-Request-Id"},
+		AllowCredentials: false,
+		MaxAge:           1 * time.Hour,
+	}))
+	dashboardRoute.OPTIONS("/*path", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	{
 		h := dasboard.NewDashboardHandler(db, rdb)
 
