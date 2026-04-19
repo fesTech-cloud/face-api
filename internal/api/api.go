@@ -336,7 +336,7 @@ const maxTopK = 100
 
 func (h *Handler) Search(c *gin.Context) {
 	var req struct {
-		Collection string  `json:"collection" binding:"required"`
+		Collection string  `json:"collection"` // optional — omit to search across all collections
 		Image      string  `json:"image"      binding:"required"`
 		TopK       int     `json:"top_k"`
 		Threshold  float64 `json:"threshold"`
@@ -375,13 +375,18 @@ func (h *Handler) Search(c *gin.Context) {
 		return
 	}
 
-	col, err := h.db.GetOrCreateCollection(c.Request.Context(), userID, req.Collection)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve collection"})
-		return
+	var results []store.FaceSearchResult
+	if req.Collection == "" {
+		// No collection specified — search across all user's collections
+		results, err = h.db.SearchFacesAcrossCollections(c.Request.Context(), userID, emb[:], req.TopK)
+	} else {
+		col, colErr := h.db.GetOrCreateCollection(c.Request.Context(), userID, req.Collection)
+		if colErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve collection"})
+			return
+		}
+		results, err = h.db.SearchFaces(c.Request.Context(), col.ID, emb[:], req.TopK)
 	}
-
-	results, err := h.db.SearchFaces(c.Request.Context(), col.ID, emb[:], req.TopK)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "search failed", "detail": err.Error()})
 		return
