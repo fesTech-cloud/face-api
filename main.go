@@ -132,6 +132,15 @@ func main() {
 	}
 
 	adminRoute := r.Group("/admin")
+
+	adminRoute.Use(cors.New(cors.Config{
+		AllowOrigins:     corsOrigins,
+		AllowMethods:     []string{"GET", "POST", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
+		ExposeHeaders:    []string{"X-Request-Id"},
+		AllowCredentials: false,
+		MaxAge:           1 * time.Hour,
+	}))
 	adminRoute.Use(auth.AdminMiddleware(db))
 	{
 		h := admin.NewHandler(db, rdb)

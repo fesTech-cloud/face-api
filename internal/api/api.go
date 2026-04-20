@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"time"
@@ -244,7 +245,7 @@ func (h *Handler) CreateSessionToken(c *gin.Context) {
 		return
 	}
 
-	userID    := c.GetString("user_id")
+	userID := c.GetString("user_id")
 	callLimit := c.GetInt("call_limit")
 
 	const maxDuration = 5 * time.Minute
@@ -368,6 +369,8 @@ func (h *Handler) Search(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid user context"})
 		return
 	}
+
+	fmt.Println("UserId", userID)
 
 	emb, _, err := h.embedWithTimeout(c.Request.Context(), req.Image)
 	if err != nil {
