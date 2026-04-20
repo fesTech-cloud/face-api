@@ -295,7 +295,12 @@ func (s *Store) EnrollFace(ctx context.Context, collectionID uuid.UUID, personID
 		Embedding:    pgvector.NewVector(embedding),
 		Metadata:     metadata,
 	}
-	return s.db.WithContext(ctx).Create(&face).Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&face).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Collection{}).Where("id = ?", collectionID).UpdateColumn("face_count", gorm.Expr("face_count + 1")).Error
+	})
 }
 
 func (s *Store) SearchFaces(ctx context.Context, collectionID uuid.UUID, queryEmbedding []float32, limit int) ([]FaceSearchResult, error) {
