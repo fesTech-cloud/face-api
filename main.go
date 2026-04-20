@@ -196,6 +196,9 @@ func main() {
 			authenticated.POST("/webhooks/:id/rotate-secret", h.RotateWebhookSecret)
 			authenticated.GET("/webhooks/:id/deliveries", h.ListWebhookDeliveries)
 
+			authenticated.GET("/collections", h.ListCollections)
+			authenticated.DELETE("/collections/:id", h.DeleteCollection)
+
 			// Usage summary
 			authenticated.GET("/usage", h.GetUsage)
 

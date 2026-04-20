@@ -463,6 +463,39 @@ func (h *DashboardHandler) ListWebhookDeliveries(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"deliveries": deliveries, "count": len(deliveries)})
 }
 
+// ── GET /dashboard/collections ───────────────────────────────────────────────
+
+func (h *DashboardHandler) ListCollections(c *gin.Context) {
+	user := c.MustGet("user").(*store.User)
+
+	collections, err := h.db.GetUserCollections(c.Request.Context(), user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list collections"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"collections": collections, "count": len(collections)})
+}
+
+// ── DELETE /dashboard/collections/:id ────────────────────────────────────────
+
+func (h *DashboardHandler) DeleteCollection(c *gin.Context) {
+	collectionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid collection id"})
+		return
+	}
+
+	user := c.MustGet("user").(*store.User)
+
+	if err := h.db.DeleteCollection(c.Request.Context(), user.ID, collectionID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "collection_id": collectionID})
+}
+
 // ── DELETE /dashboard/webhooks/:id ───────────────────────────────────────────
 
 func (h *DashboardHandler) DeleteWebhook(c *gin.Context) {
