@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -275,6 +276,28 @@ func (h *Handler) ListAuditLogs(c *gin.Context) {
 		"page":      page,
 		"page_size": pageSize,
 	})
+}
+
+// ── POST /admin/plans ───────────────────────────────────────────────────────
+
+func (h *Handler) CreatePlan(c *gin.Context) {
+	var body interfacex.CreatePlanRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	plan, err := h.db.CreatePlan(c.Request.Context(), body)
+	if err != nil {
+		if errors.Is(err, store.ErrDuplicatePlanName) {
+			c.JSON(http.StatusConflict, gin.H{"error": "a plan with that name already exists"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create plan"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"message": "plan created successfully", "plan": plan})
 }
 
 // ── PATCH /admin/plans/:id ────────────────────────────────────────────────────

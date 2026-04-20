@@ -125,22 +125,23 @@ func main() {
 		face.POST("/session-token", h.CreateSessionToken)
 	}
 
-	// Public admin login — issues PASETO token, no Firebase involved
-	{
-		h := admin.NewHandler(db, rdb)
-		r.POST("/admin/login", h.Login)
-	}
-
 	adminRoute := r.Group("/admin")
-
 	adminRoute.Use(cors.New(cors.Config{
 		AllowOrigins:     corsOrigins,
-		AllowMethods:     []string{"GET", "POST", "DELETE", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "DELETE", "PATCH", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
 		ExposeHeaders:    []string{"X-Request-Id"},
 		AllowCredentials: false,
 		MaxAge:           1 * time.Hour,
 	}))
+	adminRoute.OPTIONS("/*path", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	// Public admin login — issues PASETO token, no Firebase involved
+	{
+		h := admin.NewHandler(db, rdb)
+		adminRoute.POST("/login", h.Login)
+	}
+
 	adminRoute.Use(auth.AdminMiddleware(db))
 	{
 		h := admin.NewHandler(db, rdb)
@@ -157,6 +158,7 @@ func main() {
 		adminRoute.GET("/audit-logs", h.ListAuditLogs)
 		adminRoute.PATCH("/plans/:id", h.UpdatePlan)
 		adminRoute.DELETE("/plans/:id", h.DeletePlan)
+		adminRoute.POST("/plans", h.CreatePlan)
 	}
 
 	dashboardRoute := r.Group("/dashboard")
